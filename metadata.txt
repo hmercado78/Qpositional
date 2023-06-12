@@ -13,7 +13,7 @@ email=hmercado78@hotmail.com
 about=This plugin was developed for the assessment of the quality of geography data by applying circular statistics.
 
 tracker=http://bugs
-repository=http://repo
+repository=https://github.com/hmercado78/Qpositional.git
 # End of mandatory metadata
 
 # Recommended items:
