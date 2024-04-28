@@ -32,17 +32,28 @@ from PyQt5.QtWidgets import (QFileDialog, QTabWidget, QListWidget,
 from qgis import processing
 from qgis.core import (QgsVectorLayer, QgsFeatureRequest, QgsField, QgsProject, QgsMarkerSymbol, 
     QgsSimpleFillSymbolLayer, QgsSymbolLayer, QgsProperty, QgsFillSymbol, QgsSingleSymbolRenderer, 
-    QgsPointXY, QgsFeature, QgsGeometry, QgsCoordinateReferenceSystem, QgsCoordinateTransform)
+    QgsPointXY, QgsFeature, QgsGeometry, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsProcessingFeedback)
 from processing.tools import dataobjects
-from qgis.PyQt.QtCore import QVariant, QPoint, QPointF, QRectF
+from qgis.PyQt.QtCore import QVariant, QPoint, QPointF, QRectF, QSettings, QSize, QRect
 from qgis.utils import iface
 from PyQt5.QtCore import Qt
 import math
 from PyQt5.QtSvg import QGraphicsSvgItem, QSvgRenderer
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView
-from qgis.PyQt.QtWidgets import QGraphicsLineItem, QGraphicsEllipseItem, QGraphicsSimpleTextItem
-from qgis.PyQt.QtGui import QPen, QColor, QGradient, QBrush
+from qgis.PyQt.QtWidgets import (QGraphicsLineItem, QGraphicsEllipseItem, QGraphicsSimpleTextItem, QGraphicsRectItem, 
+    QGraphicsPixmapItem, QGraphicsPolygonItem, QApplication, QWidget)
+from qgis.PyQt.QtGui import QPen, QColor, QGradient, QBrush, QRadialGradient, QPixmap, QPolygonF, QImage, QPainter
 import collections
+import numpy as np
+import matplotlib.pyplot as plot
+import io
+from PIL import Image
+from PyQt5 import QtCore
+import threading
+from datetime import datetime
+from qgis.PyQt.QtSvg import QSvgGenerator
+from PyQt5.QtGui import QClipboard, QGuiApplication
+
 
 # Se instancia el proyecto
 project = QgsProject.instance()
@@ -84,28 +95,55 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         self.Boton1.clicked.connect(self.paso2)
         self.Boton2.clicked.connect(self.paso3)
         self.Bt1.clicked.connect(self.cir_unit)
-        self.act.clicked.connect(self.cir_unit)
         self.tabWidget.setTabEnabled(1,False)
         self.tabWidget.setTabEnabled(2,False)
+        self.tabWidget.setTabEnabled(3,False)
+        self.tabWidget.setTabEnabled(4,False)
         self.circular = QGraphicsScene(self)
         self.grafic.setScene(self.circular)
-        self.ringcolour = QColor(153, 153, 255)
-        self.ringcolour2 = QColor(250, 169, 62)
-        self.anillos.valueChanged[int].connect(self.cir_unit)
-        self.section_a.valueChanged[int].connect(self.cir_unit)
-        self.cde.currentTextChanged.connect(self.cir_unit)
+        self.cde.currentTextChanged.connect(self.redraw)
         self.az_mean_c.stateChanged.connect(self.cir_unit)
         self.des_cir_c.stateChanged.connect(self.cir_unit)
-        self.cir_unit_c.stateChanged.connect(self.cir_unit)
+        self.cir_unit_c.clicked.connect(self.cir_unit)
+        self.cir_dist_c.clicked.connect(self.cir_unit)
+        self.den_gra_c.clicked.connect(self.cir_unit)
         self.Bt1.clicked.connect(self.rest)
+        self.Bt_apply.clicked.connect(self.redraw)
         self.Bt1.setEnabled(False)
         self.rem_out.clicked.connect(self.rem_outliers)
+        self.mod_hist_c.clicked.connect(self.hist_mod)
+        self.Bt_asicur.clicked.connect(self.asi_cur)
+        self.Bt_qplotu.clicked.connect(self.qplotuni)
+        self.clas_mod.valueChanged[int].connect(self.hist_mod)
+        self.result = None
+        self.gen_info.clicked.connect(self.informe)
+        self.descarga.clicked.connect(self.desc_data)
+        self.data_csv.fileChanged.connect(self.hab_desc)
+        self.file_info.fileChanged.connect(self.hab_info)
+        self.gen_info.setEnabled(False)
+        self.descarga.setEnabled(False)
+        self.copygraf.clicked.connect(self.clip)
+        self.savesvg.clicked.connect(self.saveassvg)
 
         grupo = "Temporal"
         root = project.layerTreeRoot()
         gr_cd = root.addGroup(grupo)
         global migrupo
-        migrupo = root.findGroup(grupo) 
+        migrupo = root.findGroup(grupo)
+        global ruta_i 
+        ruta_i=""
+        
+        self.fecha.setCalendarPopup(True)
+        self.fecha.setDisplayFormat("dd-MM-yyyy")
+        fecha=datetime.now()
+        self.fecha.setDate(fecha)
+
+        global imagen
+        imagen=list()
+        global grafic
+
+        global var_rest
+        var_rest=""
 
     def SLayer_E1(self):
         global cont
@@ -116,16 +154,16 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         if Layer_E1 and Layer_F1 and Layer_E1!=Layer_F1:
             if Layer_E1.geometryType()!=Layer_F1.geometryType():
                 if (Layer_E1.geometryType()==0 and Layer_F1.geometryType()==2) or (Layer_E1.geometryType()==2 and Layer_F1.geometryType()==0): 
-                    self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to Evaluate and a dataset Source</b></font>")
+                    self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to evaluate and a dataset source</b></font>")
                     self.Boton1.setEnabled(True)
                     self.Layer_E2.setEnabled(True)
                     self.Layer_F2.setEnabled(True)
                     cont=1
                 else:    
-                    self.adv_1.setText("<font style='color:#FF0000'><b>The geometry types must be the same or (Point-Polyline or Polyline-Point)</b></font>")
+                    self.adv_1.setText("<font style='color:#FF0000'><b>The geometry types must be the same or (Point-Polygon or Polygon-Point)</b></font>")
                     self.Boton1.setEnabled(False)
             else:
-                self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to Evaluate and a dataset Source</b></font>")
+                self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to evaluate and a dataset source</b></font>")
                 self.Boton1.setEnabled(True)
                 self.Layer_E2.setEnabled(True)
                 self.Layer_F2.setEnabled(True)
@@ -143,16 +181,16 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         if Layer_E2 and Layer_F2 and Layer_E2!=Layer_F2:
             if Layer_E2.geometryType()!=Layer_F2.geometryType():
                 if (Layer_E2.geometryType()==0 and Layer_F2.geometryType()==2) or (Layer_E2.geometryType()==2 and Layer_F2.geometryType()==0): 
-                    self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to Evaluate and a dataset Source</b></font>")
+                    self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to evaluate and a dataset source</b></font>")
                     self.Boton1.setEnabled(True)
                     self.Layer_E3.setEnabled(True)
                     self.Layer_F3.setEnabled(True)
                     cont=2
                 else:    
-                    self.adv_1.setText("<font style='color:#FF0000'><b>The geometry types must be the same or (Point-Polyline or Polyline-Point)</b></font>")
+                    self.adv_1.setText("<font style='color:#FF0000'><b>The geometry types must be the same or (Point-Polygon or Polygon-Point)</b></font>")
                     self.Boton1.setEnabled(False)
             else:
-                self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to Evaluate and a dataset Source</b></font>")
+                self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to evaluate and a dataset source</b></font>")
                 self.Boton1.setEnabled(True)
                 self.Layer_E3.setEnabled(True)
                 self.Layer_F3.setEnabled(True)
@@ -170,16 +208,16 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         if Layer_E3 and Layer_F3 and Layer_E3!=Layer_F3:
             if Layer_E3.geometryType()!=Layer_F3.geometryType():
                 if (Layer_E3.geometryType()==0 and Layer_F3.geometryType()==2) or (Layer_E3.geometryType()==2 and Layer_F3.geometryType()==0): 
-                    self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to Evaluate and a dataset Source</b></font>")
+                    self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to evaluate and a dataset source</b></font>")
                     self.Boton1.setEnabled(True)
                     self.Layer_E4.setEnabled(True)
                     self.Layer_F4.setEnabled(True)
                     cont=3
                 else:
-                    self.adv_1.setText("<font style='color:#FF0000'><b>The geometry types must be the same or (Point-Polyline or Polyline-Point)</b></font>")
+                    self.adv_1.setText("<font style='color:#FF0000'><b>The geometry types must be the same or (Point-Polygon or Polygon-Point)</b></font>")
                     self.Boton1.setEnabled(False)
             else:
-                self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to Evaluate and a dataset Source</b></font>")
+                self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to evaluate and a dataset source</b></font>")
                 self.Boton1.setEnabled(True)
                 self.Layer_E4.setEnabled(True)
                 self.Layer_F4.setEnabled(True)
@@ -197,16 +235,16 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         if Layer_E4 and Layer_F4 and Layer_E4!=Layer_F4:
             if Layer_E4.geometryType()!=Layer_F4.geometryType():
                 if (Layer_E4.geometryType()==0 and Layer_F4.geometryType()==2) or (Layer_E4.geometryType()==2 and Layer_F4.geometryType()==0): 
-                    self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to Evaluate and a dataset Source</b></font>")
+                    self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to evaluate and a dataset source</b></font>")
                     self.Boton1.setEnabled(True)
                     self.Layer_E5.setEnabled(True)
                     self.Layer_F5.setEnabled(True)
                     cont=4
                 else:
-                    self.adv_1.setText("<font style='color:#FF0000'><b>The geometry types must be the same or (Point-Polyline or Polyline-Point)</b></font>")
+                    self.adv_1.setText("<font style='color:#FF0000'><b>The geometry types must be the same or (Point-Polygon or Polygon-Point)</b></font>")
                     self.Boton1.setEnabled(False)
             else:
-                self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to Evaluate and a dataset Source</b></font>")
+                self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to evaluate and a dataset source</b></font>")
                 self.Boton1.setEnabled(True)
                 self.Layer_E5.setEnabled(True)
                 self.Layer_F5.setEnabled(True)
@@ -224,22 +262,24 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         if Layer_E5 and Layer_F5  and Layer_E5!=Layer_F5:
             if Layer_E5.geometryType()!=Layer_F5.geometryType():
                 if (Layer_E5.geometryType()==0 and Layer_F5.geometryType()==2) or (Layer_E5.geometryType()==2 and Layer_F5.geometryType()==0): 
-                    self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to Evaluate and a dataset Source</b></font>")
+                    self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to evaluate and a dataset source</b></font>")
                     self.Boton1.setEnabled(True)
                     cont=5
                 else:
-                    self.adv_1.setText("<font style='color:#FF0000'><b>The geometry types must be the same or (Point-Polyline or Polyline-Point)</b></font>")
+                    self.adv_1.setText("<font style='color:#FF0000'><b>The geometry types must be the same or (Point-Polygon or Polygon-Point)</b></font>")
                     self.Boton1.setEnabled(False)
             else:
-                self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to Evaluate and a dataset Source</b></font>")
+                self.adv_1.setText("<font style='color:#297500'><b>Loaded a dataset to evaluate and a dataset source</b></font>")
                 self.Boton1.setEnabled(True)
                 cont=5
         else:
             self.adv_1.setText("<font style='color:#FF0000'><b>A dataset to be evaluated and a dataset source are required</b></font>")
             self.Boton1.setEnabled(False)
 
+
     # Se crea la lista de capas, se crea el area de cobertura comun y se verifican los conjuntos de datos
     def paso2(self):
+        self.progressBar.setValue(15)
         global Layer_E
         Layer_E = list()
         global Layer_F
@@ -247,6 +287,11 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         global entid
         entid=list()
         global inter_cd
+
+        def progress_changed(progress):
+            self.progressBar.setValue(progress)
+        feed = QgsProcessingFeedback()
+        feed.progressChanged.connect(progress_changed)
 
         self.tabWidget.setTabEnabled(1,True)
         self.tabWidget.setCurrentIndex(1)
@@ -272,19 +317,28 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             cant=0
             for feat in Layer_E[n].getFeatures():
                 cant +=1
+                hilo_topo = threading.Thread(name='paso2', target=self)
+                hilo_topo.setDaemon(True)
+                hilo_topo.start()
+                avance=50*(cant/len(Layer_E[n]))
+                self.progressBar.setValue(25+avance)
             entid.append(cant)
             n += 1
 
+
         self.Tab_ver.clear()
         self.Tab_ver.setRowCount(cont)
-        self.Tab_ver.setColumnCount(4)            
+        self.Tab_ver.setColumnCount(5)            
         self.Tab_ver.setHorizontalHeaderItem(0, QTableWidgetItem("Dataset Evaluated"))
         self.Tab_ver.setHorizontalHeaderItem(1, QTableWidgetItem("Features"))
         self.Tab_ver.setHorizontalHeaderItem(2, QTableWidgetItem("Dataset Source"))
-        self.Tab_ver.setHorizontalHeaderItem(3, QTableWidgetItem("Extent"))
+        self.Tab_ver.setHorizontalHeaderItem(3, QTableWidgetItem("Features"))
+        self.Tab_ver.setHorizontalHeaderItem(4, QTableWidgetItem("Extent"))
 
         Tab_ver = QTableWidget()
         self.Tab_ver.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
+
+        self.progressBar.setValue(25)
 
         fila = 0
         for registro in Layer_E:
@@ -317,22 +371,22 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             if Layer_E[i].crs().description()!=Layer_F[i].crs().description():
                 c_cde = Layer_E[i].crs().authid()
                 ver_cde = QgsCoordinateReferenceSystem(c_cde)
-                cdr_rep=processing.run("native:reprojectlayer", {'INPUT':Layer_F[i],'TARGET_CRS':ver_cde,'OUTPUT':'TEMPORARY_OUTPUT'})
+                cdr_rep=processing.run("native:reprojectlayer", {'INPUT':Layer_F[i],'TARGET_CRS':ver_cde,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
                 name_l=str(Layer_F[i].name())+"_Reproy"
-                ren=processing.run("native:renamelayer", {'INPUT': cdr_rep["OUTPUT"],'NAME': name_l})
+                ren=processing.run("native:renamelayer", {'INPUT': cdr_rep["OUTPUT"],'NAME': name_l}, feedback=feed)
                 project.addMapLayer(cdr_rep["OUTPUT"], False)
                 migrupo.addLayer(cdr_rep["OUTPUT"])
                 cdr_reproy.append(Layer_F[i].name)
                 Layer_F[i]=ren["OUTPUT"]
 
-            exten_cde = processing.run("native:polygonfromlayerextent", {'INPUT': Layer_E[i],'ROUND_TO':0,'OUTPUT':'TEMPORARY_OUTPUT'})
+            exten_cde = processing.run("native:polygonfromlayerextent", {'INPUT': Layer_E[i],'ROUND_TO':0,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
             project.addMapLayer(exten_cde["OUTPUT"], True)
 
-            exten_cdr = processing.run("native:polygonfromlayerextent", {'INPUT': Layer_F[i],'ROUND_TO':0,'OUTPUT':'TEMPORARY_OUTPUT'})
+            exten_cdr = processing.run("native:polygonfromlayerextent", {'INPUT': Layer_F[i],'ROUND_TO':0,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
             project.addMapLayer(exten_cdr["OUTPUT"], True)
 
             #Genera la intersection para verificar la cobertura comun
-            inter_ef = processing.run("native:intersection", {'INPUT': exten_cde["OUTPUT"], 'OVERLAY': exten_cdr["OUTPUT"], 'OUTPUT':'TEMPORARY_OUTPUT'})            
+            inter_ef = processing.run("native:intersection", {'INPUT': exten_cde["OUTPUT"], 'OVERLAY': exten_cdr["OUTPUT"], 'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)            
             project.addMapLayer(inter_ef["OUTPUT"], True)
             project.removeMapLayer(exten_cdr["OUTPUT"].id())
 
@@ -343,7 +397,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             project.removeMapLayer(exten_cde["OUTPUT"].id()) 
 
             if len(inter_ef["OUTPUT"])>0:
-                inter = processing.run("native:polygonfromlayerextent", {'INPUT': inter_ef["OUTPUT"],'ROUND_TO':0,'OUTPUT':'TEMPORARY_OUTPUT'})
+                inter = processing.run("native:polygonfromlayerextent", {'INPUT': inter_ef["OUTPUT"],'ROUND_TO':0,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
                 project.addMapLayer(inter["OUTPUT"], True)
                 project.removeMapLayer(inter_ef["OUTPUT"].id()) 
 
@@ -357,7 +411,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                     ymax.append(attrs[3])
 
                 celda4= QTableWidgetItem(str('{:,.2f}'.format(100*area_int/area_cde)) + "%")
-                self.Tab_ver.setItem(i,3,celda4)
+                self.Tab_ver.setItem(i,4,celda4)
                 if (100*(area_int/area_cde))>10:
                     fallo.append("n")
                 else:
@@ -365,12 +419,14 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                 project.removeMapLayer(inter["OUTPUT"].id()) 
             else: 
                 celda4= QTableWidgetItem("There is no common coverage area")
-                self.Tab_ver.setItem(i,3,celda4)
+                self.Tab_ver.setItem(i,4,celda4)
                 fallo.append("s")
                 xmin.append(0)
                 ymin.append(0)
                 xmax.append(0)
                 ymax.append(0)
+
+        self.progressBar.setValue(50)
 
         x_min = min(xmin)
         y_min = min(ymin)
@@ -404,9 +460,11 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         symbol = QgsFillSymbol()
         symbol.changeSymbolLayer(0, fill)
         exten.setRenderer(QgsSingleSymbolRenderer(symbol))
-        ren_ext=processing.run("native:renamelayer", {'INPUT': exten,'NAME': 'Assessment Coverage'})
+        ren_ext=processing.run("native:renamelayer", {'INPUT': exten,'NAME': 'Assessment Coverage'}, feedback=feed)
         project.addMapLayer(ren_ext["OUTPUT"], False)
         migrupo.addLayer(ren_ext["OUTPUT"])
+
+        self.progressBar.setValue(90)
 
         area_int=0
         features = exten.getFeatures()
@@ -426,15 +484,40 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         exten.removeSelection() 
         global ext
         ext=exten
-        
+
+        self.progressBar.setValue(100)
+        x=0
+        fila = 0
+        cant_sa=list()
+        for x in range((len(Layer_E))):
+            sel_s = processing.run("native:extractbylocation", {'INPUT':Layer_F[x],'PREDICATE':[0],'INTERSECT':ext,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
+            project.addMapLayer(sel_s['OUTPUT'], True)                    
+            cant_s=len(sel_s['OUTPUT'])
+            project.removeMapLayer(sel_s['OUTPUT'].id())
+
+            celda4 = QTableWidgetItem(str(cant_s))
+            self.Tab_ver.setItem(fila,3,celda4)
+            fila +=1
+            cant_sa.append(cant_s)
+
         self.Boton2.setEnabled(True)
         self.Boton2.setText("Next")
+
+        sum_cant=0
+        for x in cant_sa:
+            sum_cant+=x
+        if sum_cant==0:
+            self.Boton2.setEnabled(False)
+            self.Boton2.setText("Warning: No source datasets were found within the assessment coverage. Please RESTART")
+            self.tabWidget.setTabEnabled(0,False)
+            self.Bt1.setEnabled(True)
+
         for x in fallo:
             if x=="s":
                 self.Boton2.setEnabled(False)
                 self.Boton2.setText("Warning: Reselect data sets to be evaluate")
 
-        self.Bt1.setEnabled(True)
+
 
     #Genera los vectores de error, mediante shortestline, genera las estadisticas circulares y los diagramas
     def paso3(self):
@@ -443,6 +526,11 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         global dist
         global x
         
+        def progress_changed(progress):
+            self.progressBar.setValue(progress)
+        feed = QgsProcessingFeedback()
+        feed.progressChanged.connect(progress_changed)
+
         global nom_cde
         nom_cde=list()
         nom_cde.clear()
@@ -455,72 +543,94 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         for x in range((len(Layer_E))):
             if Layer_E[x].geometryType()==0: # si la capa es  ######## PUNTO ######
                 Layer_E[x].removeSelection()
-                sel = processing.run("native:selectbylocation", {'INPUT':Layer_E[x],'PREDICATE':[6],'INTERSECT':ext,'METHOD':0})
+                sel = processing.run("native:selectbylocation", {'INPUT':Layer_E[x],'PREDICATE':[6],'INTERSECT':ext,'METHOD':0}, feedback=feed)
 
                 if Layer_F[x].geometryType()==0: # si la capa de referencia es  ######## PUNTO ######
-                    dist = processing.run("native:shortestline", {'SOURCE':sel['OUTPUT'],'DESTINATION':Layer_F[x],'METHOD':0,'NEIGHBORS':1,'DISTANCE':None,'OUTPUT':'TEMPORARY_OUTPUT'})
-                    project.addMapLayer(dist['OUTPUT'], False)
-                    migrupo.addLayer(dist['OUTPUT'])
+                    short = processing.run("native:shortestline", {'SOURCE':sel['OUTPUT'],'DESTINATION':Layer_F[x],'METHOD':0,'NEIGHBORS':1,'DISTANCE':None,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
+                    project.addMapLayer(short['OUTPUT'], True)
                     Layer_E[x].removeSelection()
+                    dist = processing.run("native:extractbylocation", {'INPUT':short['OUTPUT'],'PREDICATE':[6],'INTERSECT':ext,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
+                    project.addMapLayer(dist['OUTPUT'], False)                    
+                    migrupo.addLayer(dist['OUTPUT'])
+                    project.removeMapLayer(short['OUTPUT'].id())
                     self.dist_Az()
 
                 if Layer_F[x].geometryType()==2: # si la capa de referencia es  ######## POLIGONO ######
-                    cen_f = processing.run("native:centroids", {'INPUT':Layer_F[x],'ALL_PARTS':False,'OUTPUT':'TEMPORARY_OUTPUT'}, context=context)                 
+                    cen_f = processing.run("native:centroids", {'INPUT':Layer_F[x],'ALL_PARTS':False,'OUTPUT':'TEMPORARY_OUTPUT'}, context=context, feedback=feed)                 
                     project.addMapLayer(cen_f['OUTPUT'], True)
               
-                    dist = processing.run("native:shortestline", {'SOURCE':sel['OUTPUT'],'DESTINATION':cen_f['OUTPUT'],'METHOD':0,'NEIGHBORS':1,'DISTANCE':None,'OUTPUT':'TEMPORARY_OUTPUT'})
-                    project.addMapLayer(dist['OUTPUT'], False)
-                    migrupo.addLayer(dist['OUTPUT'])
+                    short = processing.run("native:shortestline", {'SOURCE':sel['OUTPUT'],'DESTINATION':cen_f['OUTPUT'],'METHOD':0,'NEIGHBORS':1,'DISTANCE':None,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
+                    project.addMapLayer(short['OUTPUT'], True)
                     Layer_E[x].removeSelection()
+                    dist = processing.run("native:extractbylocation", {'INPUT':short['OUTPUT'],'PREDICATE':[6],'INTERSECT':ext,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
+                    project.addMapLayer(dist['OUTPUT'], False)                    
+                    migrupo.addLayer(dist['OUTPUT'])
+                    project.removeMapLayer(short['OUTPUT'].id())
                     project.removeMapLayer(cen_f['OUTPUT'].id()) 
                     self.dist_Az()
 
 
             if Layer_E[x].geometryType()==1: # si la capa es  ######## LINEA ######
                 Layer_E[x].removeSelection()
-                ver = processing.run("native:extractvertices", {'INPUT':Layer_E[x],'OUTPUT':'TEMPORARY_OUTPUT'}, context=context)
+                ver = processing.run("native:extractvertices", {'INPUT':Layer_E[x],'OUTPUT':'TEMPORARY_OUTPUT'}, context=context, feedback=feed)
                 project.addMapLayer(ver['OUTPUT'], True)
 
-                sel = processing.run("native:selectbylocation", {'INPUT':ver['OUTPUT'],'PREDICATE':[6],'INTERSECT':ext,'METHOD':0})
+                sel = processing.run("native:selectbylocation", {'INPUT':ver['OUTPUT'],'PREDICATE':[6],'INTERSECT':ext,'METHOD':0}, feedback=feed)
 
-                dist = processing.run("native:shortestline", {'SOURCE':sel['OUTPUT'],'DESTINATION':Layer_F[x],'METHOD':0,'NEIGHBORS':1,'DISTANCE':None,'OUTPUT':'TEMPORARY_OUTPUT'})
-                project.addMapLayer(dist['OUTPUT'], False)
-                migrupo.addLayer(dist['OUTPUT'])
+                short = processing.run("native:shortestline", {'SOURCE':sel['OUTPUT'],'DESTINATION':Layer_F[x],'METHOD':0,'NEIGHBORS':1,'DISTANCE':None,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
+                project.addMapLayer(short['OUTPUT'], True)
                 Layer_E[x].removeSelection()
+                dist = processing.run("native:extractbylocation", {'INPUT':short['OUTPUT'],'PREDICATE':[6],'INTERSECT':ext,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
+                project.addMapLayer(dist['OUTPUT'], False)                    
+                migrupo.addLayer(dist['OUTPUT'])
+                project.removeMapLayer(short['OUTPUT'].id())
                 project.removeMapLayer(ver['OUTPUT'].id())
                 self.dist_Az()
                     
             if Layer_E[x].geometryType()==2: # si la capa es  ######## POLIGONO ######
                 Layer_E[x].removeSelection()
-                cen = processing.run("native:centroids", {'INPUT':Layer_E[x],'ALL_PARTS':False,'OUTPUT':'TEMPORARY_OUTPUT'}, context=context)                 
+                cen = processing.run("native:centroids", {'INPUT':Layer_E[x],'ALL_PARTS':False,'OUTPUT':'TEMPORARY_OUTPUT'}, context=context, feedback=feed)                 
                 project.addMapLayer(cen['OUTPUT'], True)
 
-                sel=processing.run("native:selectbylocation", {'INPUT':cen['OUTPUT'],'PREDICATE':[6],'INTERSECT':ext,'METHOD':0})
+                sel=processing.run("native:selectbylocation", {'INPUT':cen['OUTPUT'],'PREDICATE':[6],'INTERSECT':ext,'METHOD':0}, feedback=feed)
 
                 if Layer_F[x].geometryType()==0: # si la capa de referencia es  ######## PUNTO ######
-                    dist = processing.run("native:shortestline", {'SOURCE':sel['OUTPUT'],'DESTINATION':Layer_F[x],'METHOD':0,'NEIGHBORS':1,'DISTANCE':None,'OUTPUT':'TEMPORARY_OUTPUT'})
-                    project.addMapLayer(dist['OUTPUT'], False)
-                    migrupo.addLayer(dist['OUTPUT'])
+                    short = processing.run("native:shortestline", {'SOURCE':sel['OUTPUT'],'DESTINATION':Layer_F[x],'METHOD':0,'NEIGHBORS':1,'DISTANCE':None,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
+                    project.addMapLayer(short['OUTPUT'], True)
                     Layer_E[x].removeSelection()
+                    dist = processing.run("native:extractbylocation", {'INPUT':short['OUTPUT'],'PREDICATE':[6],'INTERSECT':ext,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
+                    project.addMapLayer(dist['OUTPUT'], False)                    
+                    migrupo.addLayer(dist['OUTPUT'])
+                    project.removeMapLayer(short['OUTPUT'].id())
                     project.removeMapLayer(cen['OUTPUT'].id())                    
                     self.dist_Az()
 
                 if Layer_F[x].geometryType()==2: # si la capa de referencia es  ######## POLIGONO ######
-                    cen_f = processing.run("native:centroids", {'INPUT':Layer_F[x],'ALL_PARTS':False,'OUTPUT':'TEMPORARY_OUTPUT'}, context=context)                 
+                    cen_f = processing.run("native:centroids", {'INPUT':Layer_F[x],'ALL_PARTS':False,'OUTPUT':'TEMPORARY_OUTPUT'}, context=context, feedback=feed)                 
                     project.addMapLayer(cen_f['OUTPUT'], True)
-                    dist = processing.run("native:shortestline", {'SOURCE':sel['OUTPUT'],'DESTINATION':cen_f['OUTPUT'],'METHOD':0,'NEIGHBORS':1,'DISTANCE':None,'OUTPUT':'TEMPORARY_OUTPUT'})
-                    project.addMapLayer(dist['OUTPUT'], False)
+                    short = processing.run("native:shortestline", {'SOURCE':sel['OUTPUT'],'DESTINATION':cen_f['OUTPUT'],'METHOD':0,'NEIGHBORS':1,'DISTANCE':None,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
+                    project.addMapLayer(short['OUTPUT'], True)
+                    Layer_E[x].removeSelection()
+                    dist = processing.run("native:extractbylocation", {'INPUT':short['OUTPUT'],'PREDICATE':[6],'INTERSECT':ext,'OUTPUT':'TEMPORARY_OUTPUT'}, feedback=feed)
+                    project.addMapLayer(dist['OUTPUT'], False)                    
                     migrupo.addLayer(dist['OUTPUT'])
-                    Layer_E[x].removeSelection()                    
+                    project.removeMapLayer(short['OUTPUT'].id())                  
                     project.removeMapLayer(cen['OUTPUT'].id())
                     project.removeMapLayer(cen_f['OUTPUT'].id())
                     self.dist_Az()
         self.cde.addItems(list(nom_cde))
 
-        self.cir_unit()
+        if not var_rest=="SI":
+            self.cir_unit()
+
 
     # calculo de la distancia y azimut
     def dist_Az(self):
+        def progress_changed(progress):
+            self.progressBar.setValue(progress)
+        feed = QgsProcessingFeedback()
+        feed.progressChanged.connect(progress_changed)
+
         conteo=dist["OUTPUT"].fields().count() # Contar el numero de campos
         campos=list(range(conteo))
         dist["OUTPUT"].dataProvider().deleteAttributes(campos)
@@ -564,17 +674,47 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             dist["OUTPUT"].updateFeature(n)                   
         dist["OUTPUT"].commitChanges()
         nombre = "Error vectors " + (str(x+1))
-        processing.run("native:renamelayer", {'INPUT': dist["OUTPUT"],'NAME': nombre})
+        processing.run("native:renamelayer", {'INPUT': dist["OUTPUT"],'NAME': nombre}, feedback=feed)
         nom_cde.append(nombre)
+
+    def redraw(self):
+        self.tabWidget.setCurrentIndex(2)
+        if self.mod_hist_c.isChecked():
+            self.hist_mod()
+            self.t_datos()
+        if self.Bt_asicur.isChecked():
+            self.asi_cur()
+            self.t_datos()
+        if self.Bt_qplotu.isChecked():
+            self.qplotuni()
+            self.t_datos()
+        if self.cir_dist_c.isChecked():
+            self.cir_unit()
+        if self.cir_unit_c.isChecked():
+            self.cir_unit()
+        if self.den_gra_c.isChecked():
+            self.cir_unit()
 
     def cir_unit(self):
         self.tabWidget.setTabEnabled(2,True)
+        self.tabWidget.setTabEnabled(3,True)
+        self.tabWidget.setTabEnabled(4,True)
         self.tabWidget.setCurrentIndex(2)
+        self.clas_mod.setEnabled(False)
+        self.az_mean_c.setEnabled(True)
+        self.des_cir_c.setEnabled(True)
 
         self.circular.clear()
+        self.result=1
+        
+        ringcolour = self.Color_ring.color()
+        ringcolour2 = self.Color_desv.color()
         
         viewprect = QRectF(self.grafic.viewport().rect())
         global ventana
+        global start
+        global maxlength
+
         ventana=viewprect
         self.grafic.setSceneRect(viewprect)
 
@@ -595,16 +735,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         center = QPoint(int(left + (width / 2)),int(top + (height / 2)))
         # The scene geomatry of the center point
         start = QPointF(self.grafic.mapToScene(center))
-
-        for i in range(numrings):
-            step = maxlength / numrings
-            radius = step * (i + 1)
-            circle = QGraphicsEllipseItem(start.x() - radius,
-                                          start.y() - radius,
-                                          radius * 2,
-                                          radius * 2)
-            circle.setPen(QPen(self.ringcolour))
-            self.circular.addItem(circle)
+        radius = maxlength
 
         act_cde = self.cde.currentText()
 
@@ -627,6 +758,8 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                     max_total=maxi_dist
 
             global az_med
+            global az_med_t
+
             sen_az_t=0
             cos_az_t=0
             sen_az_t2=0
@@ -639,7 +772,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             for j in range(len(lista_cde)):
                 cd_selec = project.mapLayersByName(lista_cde[j])[0]
                 for i in cd_selec.getFeatures():
-                    if self.cir_unit_c.checkState():
+                    if self.cir_unit_c.isChecked():
                         attrs=i.attributes()
                         lon_feat = attrs[0]
                         azim_feat = attrs[1]
@@ -656,7 +789,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                         pos_x = (math.sin(azim_feat_e*math.pi/180))*lon
                         rel=100
                         punto = QGraphicsEllipseItem(start.x()+pos_x-((radius/rel)/2), start.y()-pos_y-((radius/rel)/2),radius/rel, radius/rel)
-                        pt_colour = QColor(255, 0, 0)
+                        pt_colour = self.Color_dot.color()
                         myPen = QPen(pt_colour)
                         myPen.setWidth(2)
                         myPen.setCapStyle(Qt.FlatCap)
@@ -664,7 +797,8 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                         brush = QBrush(QColor(pt_colour), style=Qt.SolidPattern)
                         punto.setBrush(brush)
                         self.circular.addItem(punto)
-                    else:
+
+                    if self.cir_dist_c.isChecked():
                         attrs=i.attributes()
                         lon_feat = attrs[0]
                         azim_feat = attrs[1]
@@ -675,12 +809,49 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                         pos_y = (math.cos(azim_feat*math.pi/180))*lon
                         pos_x = (math.sin(azim_feat*math.pi/180))*lon
                         linea = QGraphicsLineItem(start.x(), start.y(), start.x()+pos_x, start.y()-pos_y)
-                        ln_medcolour = QColor(0, 0, 0)
+                        ln_medcolour = self.Color_line.color()
                         myPen = QPen(ln_medcolour)
                         myPen.setWidth(2)
                         myPen.setCapStyle(Qt.FlatCap)
                         linea.setPen(myPen)
                         self.circular.addItem(linea)
+
+                    if self.den_gra_c.isChecked():
+                        attrs=i.attributes()
+                        lon_feat = attrs[0]
+                        azim_feat = attrs[1]
+                        lon = lon_feat*(radius/max_total)
+                        if lon_max<lon:
+                            lon_max=lon
+                            lon_feat_max=lon_feat
+                        pos_y = (math.cos(azim_feat*math.pi/180))*lon
+                        pos_x = (math.sin(azim_feat*math.pi/180))*lon
+                        rel=100
+                        
+                        rect = QGraphicsEllipseItem(start.x()+pos_x-(0.5*radius/(rel*0.05)), start.y()-pos_y-(0.5*radius/(rel*0.05)),radius/(rel*0.05), radius/(rel*0.05))
+                        grad = QRadialGradient(start.x()+pos_x, start.y()-pos_y, (radius/2))
+                        pt_colour1 = self.Color_d1.color()
+                        pt_colour1.setAlphaF(0.1)
+                        pt_colour2 = self.Color_d2.color()
+                        pt_colour2.setAlphaF(0.1)
+                        pt_colour3 = self.Color_d2.color()
+                        pt_colour3.setAlphaF(0)
+                        grad.setColorAt(0, pt_colour1)
+                        grad.setColorAt(1, pt_colour2)
+                        brush = QBrush(grad)
+                        rect.setPen(pt_colour3)
+                        rect.setBrush(brush)
+                        self.circular.addItem(rect)
+
+                        punto = QGraphicsEllipseItem(start.x()+pos_x, start.y()-pos_y,radius/rel, radius/rel)
+                        pt_colour = self.Color_dot.color()
+                        myPen = QPen(pt_colour)
+                        myPen.setWidth(2)
+                        myPen.setCapStyle(Qt.FlatCap)
+                        punto.setPen(myPen)
+                        brush = QBrush(QColor(pt_colour), style=Qt.SolidPattern)
+                        punto.setBrush(brush)
+                        self.circular.addItem(punto)
 
                     datos +=1
                     sum_dist += lon_feat
@@ -697,274 +868,486 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                     sen_az_t2 = sen_az_t2 + sen_az2
                     cos_az_t2 = cos_az_t2 + cos_az2
 
-            #calculo del acimut medio        
-            az_med = math.atan(sen_az_t/cos_az_t)
-            self.num_d.setText("Num data: "+str(datos))
-
-            #Calculo del acimut medio doble 
-            az_med2 = math.atan(sen_az_t2/cos_az_t2)
-
-        else:
-            cd_selec = project.mapLayersByName(str(act_cde))[0]
-            max_total = cd_selec.maximumValue(0)
-
-            sen_az_t=0
-            cos_az_t=0
-            sen_az_t2=0
-            cos_az_t2=0
-            datos=0
-            sum_dist=0
-            lon_max=0
-            lon_feat_max=0
-            for i in cd_selec.getFeatures():
-                if len(cd_selec)>0:
-                    if self.cir_unit_c.checkState():
-                        attrs=i.attributes()
-                        lon_feat = attrs[0]
-                        azim_feat = attrs[1]
-                        azim_feat_e = round(azim_feat,0)
-                        c.clear()
-                        c = collections.Counter(list_aci)
-                        veces=c[azim_feat_e]
-                        list_aci.append(azim_feat_e)    
-
-                        lon = radius-(veces/0.5)
-                        if lon<0:
-                            lon=0
-                        pos_y = (math.cos(azim_feat_e*math.pi/180))*lon
-                        pos_x = (math.sin(azim_feat_e*math.pi/180))*lon
-                        rel=100
-                        punto = QGraphicsEllipseItem(start.x()+pos_x-((radius/rel)/2), start.y()-pos_y-((radius/rel)/2),radius/rel, radius/rel)
-                        pt_colour = QColor(255, 0, 0)
-                        myPen = QPen(pt_colour)
-                        myPen.setWidth(2)
-                        myPen.setCapStyle(Qt.FlatCap)
-                        punto.setPen(myPen)
-                        brush = QBrush(QColor(pt_colour), style=Qt.SolidPattern)
-                        punto.setBrush(brush)
-                        self.circular.addItem(punto)
-
-                    else:
-                        attrs=i.attributes()
-                        lon_feat = attrs[0]
-                        azim_feat = attrs[1]
-                        lon = lon_feat*(radius/max_total)
-                        if lon_max<lon:
-                            lon_max=lon
-                            lon_feat_max=lon_feat
-                        pos_y = (math.cos(azim_feat*math.pi/180))*lon
-                        pos_x = (math.sin(azim_feat*math.pi/180))*lon
-                        linea = QGraphicsLineItem(start.x(), start.y(), start.x()+pos_x, start.y()-pos_y)
-                        ln_medcolour = QColor(0, 0, 0)
-                        myPen = QPen(ln_medcolour)
-                        myPen.setWidth(2)
-                        myPen.setCapStyle(Qt.FlatCap)
-                        linea.setPen(myPen)
-                        self.circular.addItem(linea)
-
-                    datos +=1
-                    sum_dist += lon_feat   
-
-                    # Calculo del acimut medio
-                    cos_az = (math.cos(azim_feat*math.pi/180))
-                    sen_az = (math.sin(azim_feat*math.pi/180))
-                    sen_az_t = sen_az_t + sen_az
-                    cos_az_t = cos_az_t + cos_az
-
-                    # Calculo del acimut medio doble
-                    cos_az2 = (math.cos(2*azim_feat*math.pi/180))
-                    sen_az2 = (math.sin(2*azim_feat*math.pi/180))
-                    sen_az_t2 = sen_az_t2 + sen_az2
-                    cos_az_t2 = cos_az_t2 + cos_az2
-                else:
-                    datos=0
-                    self.rem_out.setEnabled(False)
-
             # Calculo del azimut medio
             if datos!=0:    
-                az_med = math.atan(sen_az_t/cos_az_t)
+                if cos_az_t==0:
+                    az_med=(math.pi/2)
+                else:
+                    az_med = math.atan(sen_az_t/cos_az_t)
+
+                if cos_az_t==0 or sen_az_t==0:
+                    if cos_az_t==0:
+                        if sen_az_t>0:
+                            az_med=(math.pi/2)
+                        else:
+                            az_med=(math.pi/2)+math.pi
+                    else:
+                        if cos_az_t>0:
+                            az_med=0
+                        else:
+                            az_med=(math.pi)
+                else:    
+                    if cos_az_t>0 and sen_az_t>0:
+                        az_med=az_med
+                    if cos_az_t<0 and sen_az_t>0:
+                        az_med=math.pi+az_med
+                    if cos_az_t<0 and sen_az_t<0:
+                        az_med=math.pi+az_med
+                    if cos_az_t>0 and sen_az_t<0:
+                        az_med=(2*math.pi)+az_med
             else:
                 az_med=""
-            self.num_d.setText("Num data: "+str(datos))
 
             #Calculo del acimut medio doble 
             if datos!=0:
-                az_med2 = math.atan(sen_az_t2/cos_az_t2)
+                if cos_az_t2==0:
+                    az_med2=(math.pi/2)
+                else:
+                    az_med2 = math.atan(sen_az_t2/cos_az_t2)
+
+                if cos_az_t2==0 or sen_az_t2==0:
+                    if cos_az_t2==0:
+                        if sen_az_t2>0:
+                            az_med2=(math.pi/2)
+                        else:
+                            az_med2=(math.pi/2)+math.pi
+                    else:
+                        if cos_az_t2>0:
+                            az_med2=0
+                        else:
+                            az_med2=(math.pi)
+                else:    
+                    if cos_az_t2>0 and sen_az_t2>0:
+                        az_med2=az_med2
+                    if cos_az_t2<0 and sen_az_t2>0:
+                        az_med2=math.pi+az_med2
+                    if cos_az_t2<0 and sen_az_t2<0:
+                        az_med2=math.pi+az_med2
+                    if cos_az_t2>0 and sen_az_t2<0:
+                        az_med2=(2*math.pi)+az_med2
             else:
                 az_med2=""
 
-        if datos!=0: 
-            # Dibuja el azimut en el circulo unitario
-            az_med_t = az_med*(180/math.pi)
+            self.num_d.setText("Data Number: "+str(datos))
 
-            if cos_az_t==0 or sen_az_t==0:
-                if cos_az_t==0:
-                    if sen_az_t>0:
-                        az_med_t = 90
+        else:
+            if act_cde!="":
+                cd_selec = project.mapLayersByName(str(act_cde))[0]
+                max_total = cd_selec.maximumValue(0)
+
+                sen_az_t=0
+                cos_az_t=0
+                sen_az_t2=0
+                cos_az_t2=0
+                datos=0
+                sum_dist=0
+                lon_max=0
+                lon_feat_max=0
+                for i in cd_selec.getFeatures():
+                    if len(cd_selec)>0:
+                        if self.cir_unit_c.isChecked():
+                            attrs=i.attributes()
+                            lon_feat = attrs[0]
+                            azim_feat = attrs[1]
+                            azim_feat_e = round(azim_feat,0)
+                            c.clear()
+                            c = collections.Counter(list_aci)
+                            veces=c[azim_feat_e]
+                            list_aci.append(azim_feat_e)    
+
+                            lon = radius-(veces/0.5)
+                            if lon<0:
+                                lon=0
+                            pos_y = (math.cos(azim_feat_e*math.pi/180))*lon
+                            pos_x = (math.sin(azim_feat_e*math.pi/180))*lon
+                            rel=100
+                            punto = QGraphicsEllipseItem(start.x()+pos_x-((radius/rel)/2), start.y()-pos_y-((radius/rel)/2),radius/rel, radius/rel)
+                            pt_colour = self.Color_dot.color()
+                            myPen = QPen(pt_colour)
+                            myPen.setWidth(2)
+                            myPen.setCapStyle(Qt.FlatCap)
+                            punto.setPen(myPen)
+                            brush = QBrush(QColor(pt_colour), style=Qt.SolidPattern)
+                            punto.setBrush(brush)
+                            self.circular.addItem(punto)
+
+                        if self.cir_dist_c.isChecked():
+                            attrs=i.attributes()
+                            lon_feat = attrs[0]
+                            azim_feat = attrs[1]
+                            lon = lon_feat*(radius/max_total)
+                            if lon_max<lon:
+                                lon_max=lon
+                                lon_feat_max=lon_feat
+                            pos_y = (math.cos(azim_feat*math.pi/180))*lon
+                            pos_x = (math.sin(azim_feat*math.pi/180))*lon
+                            linea = QGraphicsLineItem(start.x(), start.y(), start.x()+pos_x, start.y()-pos_y)
+                            ln_medcolour = self.Color_line.color()
+                            myPen = QPen(ln_medcolour)
+                            myPen.setWidth(2)
+                            myPen.setCapStyle(Qt.FlatCap)
+                            linea.setPen(myPen)
+                            self.circular.addItem(linea)
+
+                        if self.den_gra_c.isChecked():
+                            attrs=i.attributes()
+                            lon_feat = attrs[0]
+                            azim_feat = attrs[1]
+                            lon = lon_feat*(radius/max_total)
+                            if lon_max<lon:
+                                lon_max=lon
+                                lon_feat_max=lon_feat
+                            pos_y = (math.cos(azim_feat*math.pi/180))*lon
+                            pos_x = (math.sin(azim_feat*math.pi/180))*lon
+                            rel=100
+
+                            rect = QGraphicsEllipseItem(start.x()+pos_x-(0.5*radius/(rel*0.05)), start.y()-pos_y-(0.5*radius/(rel*0.05)),radius/(rel*0.05), radius/(rel*0.05))
+                            grad = QRadialGradient(start.x()+pos_x, start.y()-pos_y, (radius/2))
+                            pt_colour1 = self.Color_d1.color()
+                            pt_colour1.setAlphaF(0.1)
+                            pt_colour2 = self.Color_d2.color()
+                            pt_colour2.setAlphaF(0.1)
+                            pt_colour3 = self.Color_d2.color()
+                            pt_colour3.setAlphaF(0)
+                            grad.setColorAt(0, pt_colour1)
+                            grad.setColorAt(1, pt_colour2)
+                            brush = QBrush(grad)
+                            rect.setPen(pt_colour3)
+                            rect.setBrush(brush)
+                            self.circular.addItem(rect)
+
+                            punto = QGraphicsEllipseItem(start.x()+pos_x, start.y()-pos_y,radius/rel, radius/rel)
+                            pt_colour = self.Color_dot.color()
+                            myPen = QPen(pt_colour)
+                            myPen.setWidth(2)
+                            myPen.setCapStyle(Qt.FlatCap)
+                            punto.setPen(myPen)
+                            brush = QBrush(QColor(pt_colour), style=Qt.SolidPattern)
+                            punto.setBrush(brush)
+                            self.circular.addItem(punto)
+
+                        datos +=1
+                        sum_dist += lon_feat   
+
+                        # Calculo del acimut medio
+                        cos_az = (math.cos(azim_feat*math.pi/180))
+                        sen_az = (math.sin(azim_feat*math.pi/180))
+                        sen_az_t = sen_az_t + sen_az
+                        cos_az_t = cos_az_t + cos_az
+
+                        # Calculo del acimut medio doble
+                        cos_az2 = (math.cos(2*azim_feat*math.pi/180))
+                        sen_az2 = (math.sin(2*azim_feat*math.pi/180))
+                        sen_az_t2 = sen_az_t2 + sen_az2
+                        cos_az_t2 = cos_az_t2 + cos_az2
                     else:
-                        az_med_t = 270
+                        datos=0
+                        self.rem_out.setEnabled(False)
+
+
+                # Calculo del azimut medio
+                if datos!=0:    
+                    if cos_az_t==0:
+                        az_med=(math.pi/2)
+                    else:
+                        az_med = math.atan(sen_az_t/cos_az_t)
+
+                    if cos_az_t==0 or sen_az_t==0:
+                        if cos_az_t==0:
+                            if sen_az_t>0:
+                                az_med=(math.pi/2)
+                            else:
+                                az_med=(math.pi/2)+math.pi
+                        else:
+                            if cos_az_t>0:
+                                az_med=0
+                            else:
+                                az_med=(math.pi)
+                    else:    
+                        if cos_az_t>0 and sen_az_t>0:
+                            az_med=az_med
+                        if cos_az_t<0 and sen_az_t>0:
+                            az_med=math.pi+az_med
+                        if cos_az_t<0 and sen_az_t<0:
+                            az_med=math.pi+az_med
+                        if cos_az_t>0 and sen_az_t<0:
+                            az_med=(2*math.pi)+az_med
                 else:
-                    if cos_az_t>0:
-                        az_med_t = 0
+                    az_med=""
+
+                #Calculo del acimut medio doble 
+                if datos!=0:
+                    if cos_az_t2==0:
+                        az_med2=(math.pi/2)
                     else:
-                        az_med_t = 180
-            else:    
-                if cos_az_t>0 and sen_az_t>0:
-                    az_med_t = az_med_t
-                if cos_az_t<0 and sen_az_t>0:
-                    az_med_t = 180+az_med_t
-                if cos_az_t<0 and sen_az_t<0:
-                    az_med_t = 180+az_med_t
-                if cos_az_t>0 and sen_az_t<0:
-                    az_med_t = 360+az_med_t
+                        az_med2 = math.atan(sen_az_t2/cos_az_t2)
 
-            if self.cir_unit_c.checkState():
-                lon_max=radius
+                    if cos_az_t2==0 or sen_az_t2==0:
+                        if cos_az_t2==0:
+                            if sen_az_t2>0:
+                                az_med2=(math.pi/2)
+                            else:
+                                az_med2=(math.pi/2)+math.pi
+                        else:
+                            if cos_az_t2>0:
+                                az_med2=0
+                            else:
+                                az_med2=(math.pi)
+                    else:    
+                        if cos_az_t2>0 and sen_az_t2>0:
+                            az_med2=az_med2
+                        if cos_az_t2<0 and sen_az_t2>0:
+                            az_med2=math.pi+az_med2
+                        if cos_az_t2<0 and sen_az_t2<0:
+                            az_med2=math.pi+az_med2
+                        if cos_az_t2>0 and sen_az_t2<0:
+                            az_med2=(2*math.pi)+az_med2
+                else:
+                    az_med2=""
+
+                self.num_d.setText("Data Number: "+str(datos))
+
+        if act_cde!="":
+            if self.cir_unit_c.isChecked() or self.cir_dist_c.isChecked():
+                #Dibuja los anillos o rings
+                for i in range(numrings):
+                    step = maxlength / numrings
+                    radius = step * (i + 1)
+                    circle = QGraphicsEllipseItem(start.x() - radius,start.y() - radius,radius * 2,radius * 2)
+                    circle.setPen(QPen(ringcolour))
+                    self.circular.addItem(circle)
+
+            if self.den_gra_c.isChecked():
+                radius = maxlength
+
+                linea_deg = QGraphicsLineItem(start.x()-radius, start.y(), start.x()+radius, start.y())            
+                deg_medcolour2 = self.Color_bin.color()
+                myPen2 = QPen(deg_medcolour2)
+                myPen2.setWidth(2)
+                myPen2.setCapStyle(Qt.FlatCap)
+                linea_deg.setPen(myPen2)
+                self.circular.addItem(linea_deg)
+
+                linea_deg = QGraphicsLineItem(start.x(), start.y()-radius, start.x(), start.y() +radius)            
+                deg_medcolour2 = self.Color_bin.color()
+                myPen2 = QPen(deg_medcolour2)
+                myPen2.setWidth(2)
+                myPen2.setCapStyle(Qt.FlatCap)
+                linea_deg.setPen(myPen2)
+                self.circular.addItem(linea_deg)
+
+
+            if datos!=0: 
+                # Dibuja el azimut en el circulo unitario
+                az_med_t = az_med*(180/math.pi)
+
+                if self.cir_unit_c.isChecked():
+                    lon_max=radius
+                    
+                pos_y = (math.cos(az_med_t*math.pi/180))*lon_max
+                pos_x = (math.sin(az_med_t*math.pi/180))*lon_max
                 
-            pos_y = (math.cos(az_med_t*math.pi/180))*lon_max
-            pos_x = (math.sin(az_med_t*math.pi/180))*lon_max
-            
-            linea_az = QGraphicsLineItem(start.x(), start.y(), start.x()+pos_x, start.y()-pos_y)
-            az_medcolour = QColor(255, 0, 0)
-            myPen = QPen(az_medcolour)
-            myPen.setWidth(2)
-            myPen.setCapStyle(Qt.FlatCap)
-            linea_az.setPen(myPen)
+                linea_az = QGraphicsLineItem(start.x(), start.y(), start.x()+pos_x, start.y()-pos_y)
+                az_medcolour = self.Color_mean.color()
+                myPen = QPen(az_medcolour)
+                myPen.setWidth(2)
+                myPen.setCapStyle(Qt.FlatCap)
+                linea_az.setPen(myPen)
 
 
-            if self.az_mean_c.checkState():
-                self.circular.addItem(linea_az)
+                if self.az_mean_c.checkState():
+                    self.circular.addItem(linea_az)
 
-            if datos==0:
-                grados,minutos,segundos=""
+                global des_cir
+                global var_ang
+                global cen_seg
+                global mod_med
+                global var_cir
+                global desv_ang
+                global desv_ang_med
+                global disp_cir
+                global par_k
+                global curt
+                global skew
+                global emh
+                global desv_sta_l
+                global desv_sta_c
+                global m2_desv
+                global sum_out
 
-            minutos, grados = math.modf(az_med_t)
-            segundos, minutos = math.modf(minutos*60)
-            segundos = (segundos*60)
-            resul_1 = f"Mean azimuth: <b>{grados:.0f}° {minutos:.0f}' {segundos:.2f}''</b><p>"
-            self.az_mean_t.setText(resul_1)
-            if self.cir_unit_c.checkState():
-                self.long_a.setText("Rings: "+str(round((1)/numrings,2)))
-            else:
-                self.long_a.setText("Rings: "+str(round((lon_feat_max)/numrings,2)))
+                if datos==0:
+                    grados,minutos,segundos=""
 
-            # Modulo medio
-            mod_med = (((cos_az_t**2)+(sen_az_t**2))**0.5)/datos
-            resul_2 = f"Mean module: <b>{mod_med:.2f}</b><p>"
-            self.mod_med_t.setText(resul_2)
+                minutos, grados = math.modf(az_med_t)
+                segundos, minutos = math.modf(minutos*60)
+                segundos = round(segundos*60,2)
+                cen_seg=str(round(segundos-int(segundos),2))[1:4]
+                resul_1 = f"Mean Azimuth: <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b>"
+                self.az_mean_t.setText(resul_1)
+                if self.cir_unit_c.isChecked():
+                    self.long_a.setText(str(round((1)/numrings,2)))
+                else:
+                    self.long_a.setText(str(round((lon_feat_max)/numrings,2)))
 
-            # Modulo medio doble
-            mod_med2 = (((cos_az_t2**2)+(sen_az_t2**2))**0.5)/datos
+                # Modulo medio
+                mod_med = (((cos_az_t**2)+(sen_az_t**2))**0.5)/datos
+                resul_2 = f"Length of Mean Vector: <b>{mod_med:.3f}</b>"
+                self.mod_med_t.setText(resul_2)
+
+                # Modulo medio doble
+                mod_med2 = (((cos_az_t2**2)+(sen_az_t2**2))**0.5)/datos
 
 
-            # Varianza circular
-            var_cir = 1 - mod_med
-            resul_3 = f"Circular Variance: <b>{var_cir:.2f}</b><p>"
-            self.var_cir_t.setText(resul_3)
+                # Varianza circular
+                var_cir = 1 - mod_med
+                resul_3 = f"Circular Variance: <b>{var_cir:.3f}</b>"
+                self.var_cir_t.setText(resul_3)
 
-            # Desviacion estandar circular
-            des_cir = ((-2*(math.log(1-var_cir))))**0.5
-            minutos, grados = math.modf(des_cir)
-            segundos, minutos = math.modf(minutos*60)
-            segundos = (segundos*60)
-            resul_4 = f"Circular Standard Deviation (Degree):<br> <b>{grados:.0f}° {minutos:.0f}' {segundos:.2f}''</b><p>"
-            self.des_cir_t.setText(resul_4)
+                # Varianza angular
+                var_ang = 2*(1 - mod_med)
+                resul_13 = f"Angular Variance: <b>{var_ang:.3f}</b>"
+                self.var_ang_t.setText(resul_13)
 
-            # Dibujar la desviacion estandar
-            az_med_i=az_med_t-des_cir
-            if az_med_i<0:
-                az_med_i=360+az_med_i
-            az_med_s=az_med_t+des_cir
-            if az_med_s>360:
-                az_med_s=az_med_s-360
+                # Desviacion estandar circular
+                des_cir = (180/math.pi)*((-2*(math.log(1-var_cir))))**0.5
+                minutos, grados = math.modf(des_cir)
+                segundos, minutos = math.modf(minutos*60)
+                segundos = round(segundos*60,2)
+                cen_seg=str(round(segundos-int(segundos),2))[1:4]
+                resul_4 = f"Circular Standard Deviation:<br> <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b>"
+                self.des_cir_t.setText(resul_4)
 
-            #Para dibujar las desviaciones estandar con tipo linea
-            #pos_y_i = (math.cos(az_med_i*math.pi/180))*lon_max
-            #pos_x_i = (math.sin(az_med_i*math.pi/180))*lon_max
-            #pos_y_s = (math.cos(az_med_s*math.pi/180))*lon_max
-            #pos_x_s = (math.sin(az_med_s*math.pi/180))*lon_max
-            #linea_az_i = QGraphicsLineItem(start.x(), start.y(), start.x()+pos_x_i, start.y()-pos_y_i)
-            #linea_az_s = QGraphicsLineItem(start.x(), start.y(), start.x()+pos_x_s, start.y()-pos_y_s)
-            #linea_az_i.setPen(myPen)
-            #linea_az_s.setPen(myPen)
-            #self.circular.addItem(linea_az_i)
-            #self.circular.addItem(linea_az_s)
-            #-----
+                # Dibujar la desviacion estandar
+                az_med_i=az_med_t-des_cir
+                if az_med_i<0:
+                    az_med_i=360+az_med_i
+                az_med_s=az_med_t+des_cir
+                if az_med_s>360:
+                    az_med_s=az_med_s-360
 
-            #Dibujar la la desviacion estandar circular como un PIE.
-            if self.des_cir_c.checkState():       
-                circle2 = QGraphicsEllipseItem(start.x() - radius,start.y() - radius,radius * 2,radius * 2)
-                circle2.setStartAngle(int((360-az_med_i+90-(des_cir*2))*16))
-                circle2.setSpanAngle(int((des_cir*2)*16))   
-                circle2.setPen(QPen(self.ringcolour2))
-                self.ringcolour2.setAlphaF(0.3)
-                circle2.setBrush((self.ringcolour2))
-                self.circular.addItem(circle2)
+                #Para dibujar las desviaciones estandar con tipo linea
+                #pos_y_i = (math.cos(az_med_i*math.pi/180))*lon_max
+                #pos_x_i = (math.sin(az_med_i*math.pi/180))*lon_max
+                #pos_y_s = (math.cos(az_med_s*math.pi/180))*lon_max
+                #pos_x_s = (math.sin(az_med_s*math.pi/180))*lon_max
+                #linea_az_i = QGraphicsLineItem(start.x(), start.y(), start.x()+pos_x_i, start.y()-pos_y_i)
+                #linea_az_s = QGraphicsLineItem(start.x(), start.y(), start.x()+pos_x_s, start.y()-pos_y_s)
+                #linea_az_i.setPen(myPen)
+                #linea_az_s.setPen(myPen)
+                #self.circular.addItem(linea_az_i)
+                #self.circular.addItem(linea_az_s)
+                #-----
 
+                #Dibujar la la desviacion estandar circular como un PIE.
+                trans=(self.trans_desv.value())/100
+                if self.des_cir_c.isChecked():       
+                    circle2 = QGraphicsEllipseItem(start.x() - radius,start.y() - radius,radius * 2,radius * 2)
+                    circle2.setStartAngle(int((360-az_med_i+90-(des_cir*2))*16))
+                    circle2.setSpanAngle(int((des_cir*2)*16))   
+                    circle2.setPen(QPen(ringcolour2))
+                    ringcolour2.setAlphaF(trans)
+                    circle2.setBrush((ringcolour2))
+                    self.circular.addItem(circle2)
+        
+                # Estimar el parámetro de concentración para una distriubción von Mises
+                if mod_med<0.53:
+                    par_k = (2*mod_med)+(mod_med**3)+((5/6)*mod_med**5)
+                if mod_med>=0.53 and mod_med<0.85:
+                    par_k = (-0.4)+(1.39*mod_med)+(0.43/(1-mod_med))
+                if mod_med>=0.85 and mod_med<0.90:
+                    par_k = 1/((2*(1-mod_med))+((1-mod_med)**2)-((1-mod_med)**3))
+                if mod_med>=0.90 and mod_med<1:
+                    par_k = 1/(2*(1-mod_med))
+                if mod_med>=1:
+                    par_k = float("inf")
+                resul_4 = f"Von Mises Concentration Parameter:<br> <b>{par_k:.3f}</b>"
+                self.par_k_t.setText(resul_4)
+
+                # Desviación estandar angular
+                sum_ang = 0
+                if act_cde=="All":
+                    for j in range(len(lista_cde)):
+                        cd_selec = project.mapLayersByName(lista_cde[j])[0]
+                        for i in cd_selec.getFeatures():
+                            attrs=i.attributes()
+                            azim_feat = attrs[1]
+                            sum_ang += math.pi-abs(math.pi-abs((azim_feat*math.pi/180)-az_med))
+                else:
+                    if act_cde!="":
+                        cd_selec = project.mapLayersByName(str(act_cde))[0]
+                        if len(cd_selec)>0:
+                            for i in cd_selec.getFeatures():
+                                attrs=i.attributes()
+                                azim_feat = attrs[1]
+                                sum_ang += math.pi-abs(math.pi-abs((azim_feat*math.pi/180)-az_med))
+
+                desv_ang = sum_ang/datos
+                desv_ang = desv_ang*180/math.pi
+                minutos, grados = math.modf(desv_ang)
+                segundos, minutos = math.modf(minutos*60)
+                segundos = round(segundos*60,2)
+                cen_seg=str(round(segundos-int(segundos),2))[1:4]
+                resul_5 = f"Angular Standard Deviation:<br> <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b>"
+                self.des_ang_t.setText(resul_5)
+
+                # Dispercion angular - desviacion angular media
+                desv_ang_med = (180/math.pi)*(2*(1-mod_med))**0.5
+                minutos, grados = math.modf(desv_ang_med)
+                segundos, minutos = math.modf(minutos*60)
+                segundos = round(segundos*60,2)
+                cen_seg=str(round(segundos-int(segundos),2))[1:4]
+                resul_6 = f"Mean Angular Deviation (Batschelet, 1981):<br> <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b>"
+                self.des_angm_t.setText(resul_6)
+
+                # Coeficiente de Asimetría (skewness o sesgo)
+                if mod_med==1:
+                    skew = 0
+                else:
+                    skew = (mod_med2*math.sin(az_med2-(2*az_med)))/(1-mod_med)**(3/2)
                 
-            # Estimar el parámetro de concentración para una distriubción von Mises
-            if mod_med<0.53:
-                k = (2*mod_med)+(mod_med**3)+((5/6)*mod_med**5)
-            if mod_med>=0.53 and mod_med<0.85:
-                k = (-0.4)+(1.39*mod_med)+(0.43/(1-mod_med))
-            if mod_med>=0.85 and mod_med<0.90:
-                k = 1/((2*(1-mod_med))+((1-mod_med)**2)-((1-mod_med)**3))
-            if mod_med>=0.90:
-                k = 1/(2*(1-mod_med))
-            resul_4 = f"Parameter Von Mises: <b>{k:.2f}</b><p>"
-            self.par_k_t.setText(resul_4)
+                resul_7 = f"Skewness Coefficient (Asimetry or Bias): <br> <b>{skew:.3f}</b>"
+                self.skew_t.setText(resul_7)
+                
+                # Medidas de Curtosis (o elevación)
+                if mod_med==1:
+                    curt = float("inf")
+                else:
+                    curt = ((mod_med2*math.cos(az_med2-(2*az_med)))-mod_med**4)/(1-mod_med)**2
+                
+                resul_8 = f"Kurtosis Coefficient (Peakedness): <br> <b>{curt:.3f}</b>"
+                self.curt_t.setText(resul_8)
 
-            # Desviación estandar angular
-            sum_ang = 0
-            for i in cd_selec.getFeatures():
-                attrs=i.attributes()
-                azim_feat = attrs[1]
-                sum_ang += math.pi-abs(math.pi-abs((azim_feat*math.pi/180)-az_med))
-            desv_ang = sum_ang/datos
-            desv_ang = desv_ang*180/math.pi
-            minutos, grados = math.modf(desv_ang)
-            segundos, minutos = math.modf(minutos*60)
-            segundos = (segundos*60)
-            resul_5 = f"Angular standard Deviation:<br> <b>{grados:.0f}° {minutos:.0f}' {segundos:.2f}''</b><p>"
-            self.des_ang_t.setText(resul_5)
-
-            # Dispercion angular - desviacion angular media
-            desv_ang_med = (180/math.pi)*(2*(1-mod_med))**0.5
-            minutos, grados = math.modf(desv_ang_med)
-            segundos, minutos = math.modf(minutos*60)
-            segundos = (segundos*60)
-            resul_6 = f"Angular mean Deviation (Batschelet, 1981):<br> <b>{grados:.0f}° {minutos:.0f}' {segundos:.2f}''</b><p>"
-            self.des_angm_t.setText(resul_6)
-
-            # Coeficiente de Asimetría (skewness o sesgo)
-            skew = (mod_med2*math.sin(az_med2-(2*az_med)))/(1-mod_med)**(3/2)
-            resul_7 = f"Skewness Coefficiennt (Asimetry or bias): <br> <b>{skew:.4f}''</b><p>"
-            self.skew_t.setText(resul_7)
-            
-            # Medidas de Curtosis (o elevación)
-            curt = ((mod_med2*math.cos(az_med2-(2*az_med)))-mod_med**4)/(1-mod_med)**2
-            resul_8 = f"Kurtosis Coefficiennt (or elevation): <br> <b>{curt:.4f}''</b><p>"
-            self.curt_t.setText(resul_8)
-
-            # dispersión circular 
-            disp_cir = (1-mod_med2)/(2*mod_med**2)
-            resul_9 = f"Circular dispersal: <b>{disp_cir:.4f}''</b><p>"
-            self.disp_cir_t.setText(resul_9)
+                # dispersión circular 
+                disp_cir = (1-mod_med2)/(2*mod_med**2)
+                resul_9 = f"Circular Dispersion: <b>{disp_cir:.3f}</b>"
+                self.disp_cir_t.setText(resul_9)
 
 
-            #Estadisticas horizontales
-            #Calculo del Error medio Horizontal
-            emh = sum_dist/datos
-            resul_10 = f"Horizontal mean error: <b>{emh:.3f}</b><p>"
-            self.emh_t.setText(resul_10)
+                #Estadisticas sobre la distancia
+                #Calculo del Error medio Horizontal
+                emh = sum_dist/datos
+                resul_10 = f"Mean Error: <b>{emh:.3f}</b>"
+                self.emh_t.setText(resul_10)
 
-            #Desviacion estandar horizontal
-            sum_error2=0
-            sum_este=0
-            sum_norte=0
-            if act_cde=="All":
-                for j in range(len(lista_cde)):
-                    cd_selec = project.mapLayersByName(lista_cde[j])[0]
+                #Desviacion estandar horizontal
+                sum_error2=0
+                sum_este=0
+                sum_norte=0
+                sum_long=0
+                if act_cde=="All":
+                    for j in range(len(lista_cde)):
+                        cd_selec = project.mapLayersByName(lista_cde[j])[0]
+                        for i in cd_selec.getFeatures():
+                            attrs=i.attributes()
+                            lon_feat = attrs[0]
+                            azim_feat = attrs[1]
+                            norte = (math.cos(azim_feat*math.pi/180))*lon_feat
+                            este = (math.sin(azim_feat*math.pi/180))*lon_feat
+                            sum_norte += norte
+                            sum_este += este
+                            sum_long +=lon_feat
+                else:
+                    cd_selec = project.mapLayersByName(str(act_cde))[0]
                     for i in cd_selec.getFeatures():
                         attrs=i.attributes()
                         lon_feat = attrs[0]
@@ -973,162 +1356,232 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                         este = (math.sin(azim_feat*math.pi/180))*lon_feat
                         sum_norte += norte
                         sum_este += este
-            else:
-                cd_selec = project.mapLayersByName(str(act_cde))[0]
-                for i in cd_selec.getFeatures():
-                    attrs=i.attributes()
-                    lon_feat = attrs[0]
-                    azim_feat = attrs[1]
-                    norte = (math.cos(azim_feat*math.pi/180))*lon_feat
-                    este = (math.sin(azim_feat*math.pi/180))*lon_feat
-                    sum_norte += norte
-                    sum_este += este
-            norte_med=sum_norte/datos
-            este_med=sum_este/datos
+                        sum_long +=lon_feat
 
-            sum_de2=0
-            sum_dn2=0
-            if act_cde=="All":
-                for j in range(len(lista_cde)):
-                    cd_selec = project.mapLayersByName(lista_cde[j])[0]
+                global norte_med
+                global este_med
+                norte_med=sum_norte/datos
+                este_med=sum_este/datos
+                long_med=sum_long/datos
+
+                sum_de2=0
+                sum_dn2=0
+                sum_lon2=0
+                if act_cde=="All":
+                    for j in range(len(lista_cde)):
+                        cd_selec = project.mapLayersByName(lista_cde[j])[0]
+                        for i in cd_selec.getFeatures():
+                            attrs=i.attributes()
+                            lon_feat = attrs[0]
+                            azim_feat = attrs[1]
+                            dnorte = (((math.cos(azim_feat*math.pi/180))*lon_feat)-norte_med)**2
+                            deste = (((math.sin(azim_feat*math.pi/180))*lon_feat)-este_med)**2
+                            d_long = (lon_feat-long_med)**2
+                            sum_dn2 += dnorte
+                            sum_de2 += deste
+                            sum_lon2 +=d_long
+                else:
+                    cd_selec = project.mapLayersByName(str(act_cde))[0]
                     for i in cd_selec.getFeatures():
                         attrs=i.attributes()
                         lon_feat = attrs[0]
                         azim_feat = attrs[1]
                         dnorte = (((math.cos(azim_feat*math.pi/180))*lon_feat)-norte_med)**2
                         deste = (((math.sin(azim_feat*math.pi/180))*lon_feat)-este_med)**2
+                        d_long = (lon_feat-long_med)**2
                         sum_dn2 += dnorte
                         sum_de2 += deste
-            else:
-                cd_selec = project.mapLayersByName(str(act_cde))[0]
-                for i in cd_selec.getFeatures():
-                    attrs=i.attributes()
-                    lon_feat = attrs[0]
-                    azim_feat = attrs[1]
-                    dnorte = (((math.cos(azim_feat*math.pi/180))*lon_feat)-norte_med)**2
-                    deste = (((math.sin(azim_feat*math.pi/180))*lon_feat)-este_med)**2
-                    sum_dn2 += dnorte
-                    sum_de2 += deste
-            desv_sta_h=(((sum_de2+sum_dn2)/(datos-1))*0.5)**0.5
-            resul_11 = f"Horizontal Standard Deviation: <br> <b>{desv_sta_h:.3f}</b><p>"
-            self.dsh_t.setText(resul_11)
-
-            #Potencial outlier 
-                # Errores groseros circular
-            m2 = (2.5055+(4.6052*math.log10(datos-1)))**0.5
-            global m2_desv
-            m2_desv = m2*desv_sta_h
-            resul_12 = f"Potencial Outlier (>): <b>{m2_desv:.3f}</b><p>"
-            self.pot_out_t.setText(resul_12)
+                        sum_lon2 +=d_long
 
 
-            #Contar outliers
-            sum_out=0
-            if act_cde=="All":
-                for j in range(len(lista_cde)):
-                    cd_selec = project.mapLayersByName(lista_cde[j])[0]
+                if datos-1!=0:
+                    residual=(((sum_de2+sum_dn2))**0.5)
+                    desv_sta_l=(((sum_lon2)/(datos-1))**0.5)
+                    desv_sta_c=(0.5*(sum_de2+sum_dn2)/(datos-1))**0.5
+                else:
+                    desv_sta_l=0
+                    residual=0
+                    desv_sta_c=0
+
+                resul_11 = f"Linear Standard Deviation: <br> <b>{desv_sta_l:.3f}</b>"
+                self.dsh_t.setText(resul_11)
+
+                resul_12 = f"Circular Standard Deviation: <br> <b>{desv_sta_c:.3f}</b>"
+                self.dsc_t.setText(resul_12)
+
+
+                #Potencial outlier 
+                    # Errores groseros circular
+                if datos-1!=0:
+                    m2 = (2.5055+(4.6052*math.log10(datos-1)))**0.5
+                else:
+                    m2=0
+
+                global m2_desv
+                m2_desv = m2*desv_sta_c
+                resul_12 = f"Potential Outlier (>): <b>{m2_desv:.3f}</b>"
+                self.pot_out_t.setText(resul_12)
+
+
+                #Contar outliers
+                sum_out=0
+                if act_cde=="All":
+                    for j in range(len(lista_cde)):
+                        cd_selec = project.mapLayersByName(lista_cde[j])[0]
+                        for i in cd_selec.getFeatures():
+                            attrs=i.attributes()
+                            lon_feat = attrs[0]
+                            azim_feat = attrs[1]
+                            dnorte = (((math.cos(azim_feat*math.pi/180))*lon_feat)-norte_med)**2
+                            deste = (((math.sin(azim_feat*math.pi/180))*lon_feat)-este_med)**2
+                            res=(dnorte+deste)**0.5
+                            if res>=m2_desv:
+                                sum_out += 1
+                else:
+                    cd_selec = project.mapLayersByName(str(act_cde))[0]
                     for i in cd_selec.getFeatures():
                         attrs=i.attributes()
                         lon_feat = attrs[0]
-                        if lon_feat>=m2_desv:
+                        azim_feat = attrs[1]
+                        dnorte = (((math.cos(azim_feat*math.pi/180))*lon_feat)-norte_med)**2
+                        deste = (((math.sin(azim_feat*math.pi/180))*lon_feat)-este_med)**2
+                        res=(dnorte+deste)**0.5
+                        if res>=m2_desv:
                             sum_out += 1
-            else:
-                cd_selec = project.mapLayersByName(str(act_cde))[0]
-                for i in cd_selec.getFeatures():
-                    attrs=i.attributes()
-                    lon_feat = attrs[0]
-                    if lon_feat>=m2_desv:
-                        sum_out += 1
 
-            resul_12 = f"Total Outlier: <b>{sum_out:.0f}</b><p>"
-            self.tot_out_t.setText(resul_12)
+                resul_12 = f"Total Outlier: <b>{sum_out:.0f}</b>"
+                self.tot_out_t.setText(resul_12)
 
-            if sum_out>0:
-                self.rem_out.setEnabled(True)
-            else:
-                self.rem_out.setEnabled(False)
+                if sum_out>0:
+                    self.rem_out.setEnabled(True)
+
+                    #Dibujar un circulo de probabilidad de los outliers
+                    if self.den_gra_c.isChecked():
+                        circ=m2_desv*(radius/max_total)
+                        circle = QGraphicsEllipseItem(start.x() - circ, start.y() - circ, circ*2, circ*2)
+                        circle.setPen(QPen(ringcolour))
+                        self.circular.addItem(circle)
+
+                        texts = QGraphicsSimpleTextItem("Outlier")
+                        pos=((2**0.5)/2)*circ*1.1
+                        texts.setPos(start.x() + pos,start.y() + pos)
+                        deg_medcolour2 = QColor(197, 197, 197)
+                        myPen2 = QPen(deg_medcolour2)
+                        texts.setPen(myPen2)
+                        self.circular.addItem(texts)
+                else:
+                    self.rem_out.setEnabled(False)
+
         else:
-            resul_1 = "Mean azimuth: <b>-° -' -''</b><p>"
+            resul_1 = "Mean Azimuth: <b>-° -' -''</b>"
             self.az_mean_t.setText(resul_1)
-            resul_2 = "Mean module: <b>-</b><p>"
+            resul_2 = "Length of Mean Vector: <b>-</b>"
             self.mod_med_t.setText(resul_2)
-            resul_3 = "Circular Variance: <b>-</b><p>"
+            resul_3 = "Circular Variance: <b>-</b>"
             self.var_cir_t.setText(resul_3)
-            resul_4 = "Circular Standard Deviation (Degree):<br> <b>-° -' -''</b><p>"
+            resul_4 = "Circular Standard Deviation (Degree):<br> <b>-° -' -''</b>"
             self.des_cir_t.setText(resul_4)
-            resul_4 = "Parameter Von Mises: <b>-</b><p>"
+            resul_13 = f"Angular Variance: <b>-</b>"
+            self.var_ang_t.setText(resul_13)
+            resul_4 = "Von Mises Concentration Parameter:<br> <b>-</b>"
             self.par_k_t.setText(resul_4)
-            resul_5 = "Angular standard Deviation:<br> <b>-° -' -''</b><p>"
+            resul_5 = "Angular Standard Deviation:<br> <b>-° -' -''</b>"
             self.des_ang_t.setText(resul_5)
-            resul_6 = "Angular mean Deviation (Batschelet, 1981):<br> <b>-° -' -''</b><p>"
+            resul_6 = "Mean Angular Deviation (Batschelet, 1981):<br> <b>-° -' -''</b>"
             self.des_angm_t.setText(resul_6)
-            resul_7 = "Skewness Coefficiennt (Asimetry or bias): <br> <b>-''</b><p>"
+            resul_7 = "Skewness Coefficient (Asimetry or bias): <br> <b>-</b>"
             self.skew_t.setText(resul_7)
-            resul_8 = "Kurtosis Coefficiennt (or elevation): <br> <b>-''</b><p>"
+            resul_8 = "Kurtosis Coefficient (Peakedness): <br> <b>-</b>"
             self.curt_t.setText(resul_8)
-            resul_9 = "Circular dispersal: <b>-''</b><p>"
+            resul_9 = "Circular Dispersion: <b>-''</b>"
             self.disp_cir_t.setText(resul_9)
-            resul_10 = "Horizontal mean error: <b>-</b><p>"
+            resul_10 = "Mean Error: <b>-</b>"
             self.emh_t.setText(resul_10)
-            resul_11 = "Horizontal Standard Deviation: <br> <b>-</b><p>"
+            resul_11 = "Standard Deviation: <br> <b>-</b>"
             self.dsh_t.setText(resul_11)
-            resul_12 = "Potencial Outlier (>): <b>-</b><p>"
+            resul_11 = "Circular Standard Deviation: <br> <b>-</b>"
+            self.dsc_t.setText(resul_11)
+            resul_12 = "Potencial Outlier (>): <b>-</b>"
             self.pot_out_t.setText(resul_12)
-            resul_12 = "Total Outlier: <b>-</b><p>"
+            resul_12 = "Total Outlier: <b>-</b>"
             self.tot_out_t.setText(resul_12)
-
-
-        # Dibuja los sectores en el circulo unitario
-        sect=self.section_a.value()
-        deg_sec=360/sect
-        self.deg_a.setText(str(round(deg_sec,0))+"°")
-
-        for i in range(sect):
-            ang=i*deg_sec
-            pos_y = (math.cos(ang*math.pi/180))*(lon_max*1.05)
-            pos_x = (math.sin(ang*math.pi/180))*(lon_max*1.05)
-            linea_deg = QGraphicsLineItem(start.x(), start.y(), start.x()+pos_x, start.y()-pos_y)            
-            deg_medcolour2 = QColor(197, 197, 197)
-            myPen2 = QPen(deg_medcolour2)
-            myPen2.setWidth(2)
-            myPen2.setCapStyle(Qt.FlatCap)
-            linea_deg.setPen(myPen2)
-            self.circular.addItem(linea_deg)
+            text2 = QGraphicsSimpleTextItem(str("No Data"))
+            text2.setPos(start.x(),start.y())
+            self.circular.addItem(text2) 
 
         #Textos en el grafico
-        if self.cir_unit_c.checkState():  
+        if self.cir_unit_c.isChecked():  
             title = QGraphicsSimpleTextItem("Unit circle graph")
             title.setPos(10,10)
             self.circular.addItem(title)
-        else:
+        
+        if self.cir_dist_c.isChecked():  
             title = QGraphicsSimpleTextItem("Module and azimuth distribution graph")
             title.setPos(10,10)
             self.circular.addItem(title)
 
-        text1 = QGraphicsSimpleTextItem("0")
-        text1.setPos((left + (width / 2))-3,(top + (height / 2))-radius*1.10)
-        self.circular.addItem(text1)
+        if self.den_gra_c.isChecked():  
+            title = QGraphicsSimpleTextItem("Density graph")
+            title.setPos(10,10)
+            self.circular.addItem(title)
 
-        text2 = QGraphicsSimpleTextItem("90")
-        text2.setPos((left + (width / 2))+radius*1.05,(top + (height / 2))-8)
-        self.circular.addItem(text2)
+        if act_cde!="":
+            if datos!=0:
+                if self.cir_unit_c.isChecked() or self.cir_dist_c.isChecked():
+                    # Dibuja los sectores en el circulo unitario
+                    sect=self.section_a.value()
+                    deg_sec=360/sect
+                    self.deg_a.setText(str(round(deg_sec,0))+"°")
 
-        text3 = QGraphicsSimpleTextItem("180")
-        text3.setPos((left + (width / 2)-8),(top + (height / 2))+radius*1.05)
-        self.circular.addItem(text3)
+                    for i in range(sect):
+                        ang=i*deg_sec
+                        pos_y = (math.cos(ang*math.pi/180))*(lon_max*1.05)
+                        pos_x = (math.sin(ang*math.pi/180))*(lon_max*1.05)
+                        linea_deg = QGraphicsLineItem(start.x(), start.y(), start.x()+pos_x, start.y()-pos_y)            
+                        deg_medcolour2 = self.Color_bin.color()
+                        myPen2 = QPen(deg_medcolour2)
+                        myPen2.setWidth(2)
+                        myPen2.setCapStyle(Qt.FlatCap)
+                        linea_deg.setPen(myPen2)
+                        self.circular.addItem(linea_deg)
 
-        text4 = QGraphicsSimpleTextItem("270")
-        text4.setPos((left + (width / 2))-radius*1.10,(top + (height / 2))-8)
-        self.circular.addItem(text4)
+                    #Textos en el grafico
+                    text1 = QGraphicsSimpleTextItem("0°")
+                    text1.setPos((left + (width / 2))-3,(top + (height / 2))-radius*1.10)
+                    self.circular.addItem(text1)
 
-        self.Bt1.setEnabled(True)
+                    text2 = QGraphicsSimpleTextItem("90°")
+                    text2.setPos((left + (width / 2))+radius*1.05,(top + (height / 2))-8)
+                    self.circular.addItem(text2)
+
+                    text3 = QGraphicsSimpleTextItem("180°")
+                    text3.setPos((left + (width / 2)-8),(top + (height / 2))+radius*1.05)
+                    self.circular.addItem(text3)
+
+                    text4 = QGraphicsSimpleTextItem("270°")
+                    text4.setPos((left + (width / 2))-radius*1.10,(top + (height / 2))-8)
+                    self.circular.addItem(text4)
+
+                    #Texto en el circulo unitario
+                    for i in range(numrings):
+                        step = maxlength / numrings
+                        radius = step * (i + 1)
+                        if self.cir_unit_c.isChecked():
+                            text=round((i + 1)/numrings,2)
+                        
+                        if self.cir_dist_c.isChecked():
+                            text=round((i + 1)*lon_feat_max/numrings,2)
+
+                        text2 = QGraphicsSimpleTextItem(str(text))
+                        pos=((2**0.5)/2)*radius
+                        text2.setPos(start.x() + pos,start.y() + pos)
+                        self.circular.addItem(text2)
+
+            self.t_datos()
+            self.Bt1.setEnabled(True)
+
 
     def rest(self):
-        self.Bt1.setEnabled(False)
-        self.tabWidget.setTabEnabled(1,False)
-        self.tabWidget.setTabEnabled(2,False)
-        self.tabWidget.setCurrentIndex(0)
-
         self.Layer_E1.setCurrentIndex(-1)
         self.Layer_F1.setCurrentIndex(-1)
         self.Layer_E2.setCurrentIndex(-1)
@@ -1139,6 +1592,17 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         self.Layer_F4.setCurrentIndex(-1)
         self.Layer_E5.setCurrentIndex(-1)
         self.Layer_F5.setCurrentIndex(-1)
+
+        Layer_E1 = self.Layer_E1.currentLayer()
+        Layer_F1 = self.Layer_F1.currentLayer()
+        Layer_E2 = self.Layer_E2.currentLayer()
+        Layer_F2 = self.Layer_F2.currentLayer()
+        Layer_E3 = self.Layer_E3.currentLayer()
+        Layer_F3 = self.Layer_F3.currentLayer()
+        Layer_E4 = self.Layer_E4.currentLayer()
+        Layer_F4 = self.Layer_F4.currentLayer()
+        Layer_E5 = self.Layer_E5.currentLayer()
+        Layer_F5 = self.Layer_F5.currentLayer()
 
         self.Layer_E2.setEnabled(False)
         self.Layer_F2.setEnabled(False)
@@ -1156,8 +1620,23 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             capa=QgsProject.instance().mapLayersByName(child.name())
             QgsProject.instance().removeMapLayer(capa[0].id())
 
-        nom_cde.clear()
-        lista_cde.clear()
+        self.cde.clear()
+        self.data.clear()
+        if len(imagen)>0:
+            imagen.clear()
+        
+        datos=0
+        self.progressBar.setValue(0)
+
+        self.Bt1.setEnabled(False)
+        self.Boton1.setEnabled(False)
+        self.tabWidget.setTabEnabled(0,True)
+        self.tabWidget.setTabEnabled(1,False)
+        self.tabWidget.setTabEnabled(2,False)
+        self.tabWidget.setTabEnabled(3,False)
+        self.tabWidget.setTabEnabled(4,False)
+        self.tabWidget.setCurrentIndex(0)
+        var_rest="SI"
 
     def rem_outliers(self):
         act_cde = self.cde.currentText()
@@ -1167,7 +1646,11 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                 for i in cd_selec.getFeatures():
                     attrs=i.attributes()
                     lon_feat = attrs[0]
-                    if lon_feat>=m2_desv:
+                    azim_feat = attrs[1]
+                    dnorte = (((math.cos(azim_feat*math.pi/180))*lon_feat)-norte_med)**2
+                    deste = (((math.sin(azim_feat*math.pi/180))*lon_feat)-este_med)**2
+                    res=(dnorte+deste)**0.5
+                    if res>=m2_desv:
                         cd_selec.dataProvider().deleteFeatures([i.id()])
                         cd_selec.updateFeature(i)
         else:
@@ -1175,7 +1658,1020 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             for i in cd_selec.getFeatures():
                 attrs=i.attributes()
                 lon_feat = attrs[0]
-                if lon_feat>=m2_desv:
+                azim_feat = attrs[1]
+                dnorte = (((math.cos(azim_feat*math.pi/180))*lon_feat)-norte_med)**2
+                deste = (((math.sin(azim_feat*math.pi/180))*lon_feat)-este_med)**2
+                res=(dnorte+deste)**0.5
+                if res>=m2_desv:
                     cd_selec.dataProvider().deleteFeatures([i.id()])
                     cd_selec.updateFeature(i)
-        self.cir_unit()
+
+        self.redraw()
+
+
+    def hist_mod(self):
+        self.clas_mod.setEnabled(True)
+        clas=self.clas_mod.value()
+        act_cde = self.cde.currentText()
+        self.az_mean_c.setEnabled(False)
+        self.des_cir_c.setEnabled(False)
+        self.rem_out.setEnabled(False)
+
+        lis_mod=list()
+        lis_mod.clear()
+
+        if act_cde=="All":
+            for j in range(len(lista_cde)):
+                cd_selec = project.mapLayersByName(lista_cde[j])[0]
+                for i in cd_selec.getFeatures():
+                    attrs=i.attributes()
+                    lon_feat2 = attrs[0]
+                    lis_mod.append(lon_feat2)
+        else:
+            cd_selec = project.mapLayersByName(str(act_cde))[0]
+            for i in cd_selec.getFeatures():
+                attrs=i.attributes()
+                lon_feat2 = attrs[0]
+                lis_mod.append(lon_feat2)
+
+        self.circular.clear()
+
+        cant=len(lis_mod)
+        datos=cant
+
+        self.num_d.setText("Data Number: "+str(datos))
+
+        viewprect = QRectF(self.grafic.viewport().rect())
+        ventana=viewprect
+        self.grafic.setSceneRect(viewprect)
+        left = self.grafic.sceneRect().left()
+        right = self.grafic.sceneRect().right()
+        width = right - left
+        top = self.grafic.sceneRect().top()
+        bottom = self.grafic.sceneRect().bottom()
+        height = (bottom - top)
+
+        if cant>0:
+            lon_feat_max=max(lis_mod)
+            rang=lon_feat_max/clas
+
+            frecuencias, extremos = np.histogram(lis_mod, bins=clas)
+
+            size = width
+            if width > height:
+                size = height
+            padding = 15
+            maxlength = (size / 2) - padding * 2
+
+            center = QPoint(int(left + (width / 2)),int(top + (height / 2)))
+            # The scene geomatry of the center point
+            start = QPointF(self.grafic.mapToScene(center))
+
+            ancho=maxlength
+            height = (bottom - top)*0.90
+            alto=height-(height*0.02)
+            alto2=(height/2.01)
+
+            x0=0
+            y0=2*alto2
+            t=0
+            x=0
+            y=0
+
+            for i in frecuencias:
+                x = t*2*ancho/clas
+                y = frecuencias[t]*(2*alto2)/frecuencias[0]
+
+                linea_quan = QGraphicsLineItem(start.x()-ancho+x0, start.y()-y0+alto2, start.x()-ancho+x, start.y()-y+alto2)            
+                colour = self.Color_line.color()
+                myPen2 = QPen(colour)
+                myPen2.setWidth(2)
+                myPen2.setCapStyle(Qt.FlatCap)
+                linea_quan.setPen(myPen2)
+                self.circular.addItem(linea_quan)
+                x0=x
+                y0=y
+                t +=1
+
+            # Lineas Verticales
+            linea_cua = QGraphicsLineItem(start.x()-ancho, start.y()+alto2, start.x()-ancho, start.y()-alto2)            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho+(x/4), start.y()+alto2, start.x()-ancho+(x/4), start.y()-alto2)            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho+x, start.y()+alto2, start.x()-ancho+x, start.y()-alto2)            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho+(3*x/4), start.y()+alto2, start.x()-ancho+(3*x/4), start.y()-alto2)            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho+(x/2), start.y()+alto2, start.x()-ancho+(x/2), start.y()-alto2)            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            # Lineas Horizontales
+            linea_cua = QGraphicsLineItem(start.x()-ancho, start.y()+alto2, start.x()-ancho+x, start.y()+alto2)            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho, start.y()-alto2, start.x()-ancho+x, start.y()-alto2)            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho, start.y(), start.x()-ancho+x, start.y())            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho, start.y()+(alto2/2), start.x()-ancho+x, start.y()+(alto2/2))            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)        
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho, start.y()-(alto2/2), start.x()-ancho+x, start.y()-(alto2/2))            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)  
+
+            # textos cuadricula
+            text2 = QGraphicsSimpleTextItem(str(0))
+            text2.setPos(start.x() - ancho,start.y()+8+alto2)
+            self.circular.addItem(text2)     
+
+            text2 = QGraphicsSimpleTextItem(str(int(extremos[-1])))
+            text2.setPos(start.x() - ancho + x -10,start.y()+8+alto2)
+            self.circular.addItem(text2)     
+
+            text2 = QGraphicsSimpleTextItem(str(int(extremos[-1]/4)))
+            text2.setPos(start.x() - ancho + (x/4)-10,start.y()+8+alto2)
+            self.circular.addItem(text2) 
+
+            text2 = QGraphicsSimpleTextItem(str(int(extremos[-1]/2)))
+            text2.setPos(start.x() - ancho + (x/2)-10,start.y()+8+alto2)
+            self.circular.addItem(text2)     
+
+            text2 = QGraphicsSimpleTextItem(str(int(extremos[-1]*0.75)))
+            text2.setPos(start.x() - ancho + (3*x/4)-10,start.y()+8+alto2)
+            self.circular.addItem(text2) 
+
+            text2 = QGraphicsSimpleTextItem(str(0))
+            text2.setPos(start.x() - ancho - 20 ,start.y()+alto2)
+            self.circular.addItem(text2) 
+
+            text2 = QGraphicsSimpleTextItem(str(int(frecuencias[0]*0.25)))
+            text2.setPos(start.x() - ancho - 20 ,start.y()+(alto2/2))
+            self.circular.addItem(text2) 
+
+            text2 = QGraphicsSimpleTextItem(str(int(frecuencias[0]*0.5)))
+            text2.setPos(start.x() - ancho - 20 ,start.y())
+            self.circular.addItem(text2) 
+
+            text2 = QGraphicsSimpleTextItem(str(int(frecuencias[0]*0.75)))
+            text2.setPos(start.x() - ancho - 20 ,start.y()-(alto2/2))
+            self.circular.addItem(text2) 
+
+            text2 = QGraphicsSimpleTextItem(str(frecuencias[0]))
+            text2.setPos(start.x() - ancho - 20 ,start.y()-alto2)
+            self.circular.addItem(text2) 
+        else:
+            text2 = QGraphicsSimpleTextItem(str("No Data"))
+            text2.setPos(start.x(),start.y())
+            self.circular.addItem(text2) 
+
+            resul_1 = "Mean Azimuth: <b>-° -' -''</b>"
+            self.az_mean_t.setText(resul_1)
+            resul_2 = "Length of Mean Vector: <b>-</b>"
+            self.mod_med_t.setText(resul_2)
+            resul_3 = "Circular Variance: <b>-</b>"
+            self.var_cir_t.setText(resul_3)
+            resul_4 = "Circular Standard Deviation (Degree):<br> <b>-° -' -''</b>"
+            self.des_cir_t.setText(resul_4)
+            resul_13 = f"Angular Variance: <b>-</b>"
+            self.var_ang_t.setText(resul_13)
+            resul_4 = "Von Mises Concentration Parameter:<br> <b>-</b>"
+            self.par_k_t.setText(resul_4)
+            resul_5 = "Angular Standard Deviation:<br> <b>-° -' -''</b>"
+            self.des_ang_t.setText(resul_5)
+            resul_6 = "Mean Angular Deviation (Batschelet, 1981):<br> <b>-° -' -''</b>"
+            self.des_angm_t.setText(resul_6)
+            resul_7 = "Skewness Coefficient (Asimetry or bias): <br> <b>-</b>"
+            self.skew_t.setText(resul_7)
+            resul_8 = "Kurtosis Coefficient (Peakedness): <br> <b>-</b>"
+            self.curt_t.setText(resul_8)
+            resul_9 = "Circular Dispersion: <b>-''</b>"
+            self.disp_cir_t.setText(resul_9)
+            resul_10 = "Mean Error: <b>-</b>"
+            self.emh_t.setText(resul_10)
+            resul_11 = "Standard Deviation: <br> <b>-</b>"
+            self.dsh_t.setText(resul_11)
+            resul_11 = "Circular Standard Deviation: <br> <b>-</b>"
+            self.dsc_t.setText(resul_11)
+            resul_12 = "Potencial Outlier (>): <b>-</b>"
+            self.pot_out_t.setText(resul_12)
+            resul_12 = "Total Outlier: <b>-</b>"
+            self.tot_out_t.setText(resul_12)
+            self.num_d.setText("Data Number: "+str(0))
+
+        title = QGraphicsSimpleTextItem("Module Histogram")
+        title.setPos(10,10)
+        self.circular.addItem(title)
+
+
+    def asi_cur(self):
+        act_cde = self.cde.currentText()
+        self.circular.clear()
+        self.az_mean_c.setEnabled(False)
+        self.des_cir_c.setEnabled(False)
+        self.rem_out.setEnabled(False)
+
+        lis_az=list()
+        lis_az.clear()
+
+        if act_cde=="All":
+            for j in range(len(lista_cde)):
+                cd_selec = project.mapLayersByName(lista_cde[j])[0]
+                for i in cd_selec.getFeatures():
+                    attrs=i.attributes()
+                    az_feat = round(attrs[1],0)
+                    az_feat =int(az_feat)
+                    lis_az.append(az_feat)
+        else:
+            cd_selec = project.mapLayersByName(str(act_cde))[0]
+            for i in cd_selec.getFeatures():
+                attrs=i.attributes()
+                az_feat = round(attrs[1],0)
+                az_feat =int(az_feat)
+                lis_az.append(az_feat)
+        
+        datos=len(lis_az)
+        
+        self.num_d.setText("Data Number: "+str(datos))
+
+        if len(lis_az)>0:
+            az_max=max(lis_az)
+            az_min=min(lis_az)
+
+            clas=az_max-az_min
+            if clas==0:
+                clas=1
+
+            frecuencias, extremos = np.histogram(lis_az, bins=clas)
+
+            az_med_i=int(round(az_med_t,0))
+            max_frec=max(frecuencias)
+
+            viewprect = QRectF(self.grafic.viewport().rect())
+            ventana=viewprect
+            self.grafic.setSceneRect(viewprect)
+
+            left = self.grafic.sceneRect().left()
+            right = self.grafic.sceneRect().right()
+            width = right - left
+            top = self.grafic.sceneRect().top()
+            bottom = self.grafic.sceneRect().bottom()
+            height = bottom - top
+
+            size = width
+            if width > height:
+                size = height
+            padding = 15
+            maxlength = (size / 2) - padding * 2
+
+            ancho=maxlength
+            alto=(height/3)
+
+            center = QPoint(int(left + (width / 2)),int(top + (height / 2)))
+            # The scene geomatry of the center point
+            start = QPointF(self.grafic.mapToScene(center))
+
+            self.circular.clear()
+            linea_base = QGraphicsLineItem(start.x()-ancho, start.y()+alto, start.x()+ancho, start.y()+alto)            
+            colour2 = self.Color_bin.color()
+            myPen2 = QPen(colour2)
+            myPen2.setWidth(2)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_base.setPen(myPen2)
+            self.circular.addItem(linea_base)
+
+            linea_mean = QGraphicsLineItem(start.x(), start.y()+alto, start.x(), start.y()+alto-ancho)            
+            colour2 = self.Color_mean.color()
+            myPen2 = QPen(colour2)
+            myPen2.setWidth(2)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_mean.setPen(myPen2)
+            self.circular.addItem(linea_mean)
+
+            if (az_max-az_min)!=0:
+                qt_polygon = QPolygonF()
+
+                ind=np.where(extremos==az_med_i)
+                ind=ind[0][0]
+                ind_i=ind-int(round(len(extremos)/2,0))
+                ind_s=ind+int(round(len(extremos)/2,0))
+                if ind_s>len(extremos):
+                    ind_s=ind_i-1
+
+                cont=0
+                for x in range(len(extremos)-1):
+                    if (ind_i+x)>=(len(extremos)-1):
+                        ind_i=cont
+                        if frecuencias[ind_i]!=0:
+                            posx1=((-clas/2)+x)*(ancho/180)
+                            posy1=frecuencias[ind_i]*(ancho/max_frec)
+                            qt_polygon.append(QPointF(start.x()+posx1, start.y()-posy1+alto))
+                        cont +=1
+                    else:
+                        if frecuencias[ind_i+x]!=0:
+                            posx1=((-clas/2)+x)*(ancho/180)
+                            posy1=frecuencias[ind_i+x]*(ancho/max_frec)
+                            qt_polygon.append(QPointF(start.x()+posx1, start.y()-posy1+alto))
+
+                    
+                qt_polygon.append(QPointF(start.x()+ancho, start.y()+alto))
+                qt_polygon.append(QPointF(start.x()-ancho, start.y()+alto))
+
+                polygon_item = QGraphicsPolygonItem(qt_polygon)
+                pt_colour = self.Color_line.color()
+                pt_colour.setAlphaF(0.3)
+                myPen = QPen(pt_colour)
+                myPen.setWidth(2)
+                myPen.setCapStyle(Qt.FlatCap)
+                polygon_item.setPen(myPen)
+                brush = QBrush(QColor(pt_colour), style=Qt.SolidPattern)
+                polygon_item.setBrush(brush)
+                self.circular.addItem(polygon_item)
+
+
+            text2 = QGraphicsSimpleTextItem(str(az_med_i))
+            text2.setPos(start.x(),start.y()+8+alto)
+            self.circular.addItem(text2)
+
+            text2 = QGraphicsSimpleTextItem(str(az_min))
+            text2.setPos(start.x()+((-clas/2)*(ancho/180)),start.y()+8+alto)
+            self.circular.addItem(text2)
+
+            text2 = QGraphicsSimpleTextItem(str(az_max))
+            text2.setPos(start.x()+((clas/2)*(ancho/180)),start.y()+8+alto)
+            self.circular.addItem(text2)
+
+        else:
+            text2 = QGraphicsSimpleTextItem(str("No data"))
+            text2.setPos(start.x(),start.y())
+            self.circular.addItem(text2)
+
+            resul_1 = "Mean Azimuth: <b>-° -' -''</b>"
+            self.az_mean_t.setText(resul_1)
+            resul_2 = "Length of Mean Vector: <b>-</b>"
+            self.mod_med_t.setText(resul_2)
+            resul_3 = "Circular Variance: <b>-</b>"
+            self.var_cir_t.setText(resul_3)
+            resul_4 = "Circular Standard Deviation (Degree):<br> <b>-° -' -''</b>"
+            self.des_cir_t.setText(resul_4)
+            resul_13 = f"Angular Variance: <b>-</b>"
+            self.var_ang_t.setText(resul_13)
+            resul_4 = "Von Mises Concentration Parameter:<br> <b>-</b>"
+            self.par_k_t.setText(resul_4)
+            resul_5 = "Angular Standard Deviation:<br> <b>-° -' -''</b>"
+            self.des_ang_t.setText(resul_5)
+            resul_6 = "Mean Angular Deviation (Batschelet, 1981):<br> <b>-° -' -''</b>"
+            self.des_angm_t.setText(resul_6)
+            resul_7 = "Skewness Coefficient (Asimetry or bias): <br> <b>-</b>"
+            self.skew_t.setText(resul_7)
+            resul_8 = "Kurtosis Coefficient (Peakedness): <br> <b>-</b>"
+            self.curt_t.setText(resul_8)
+            resul_9 = "Circular Dispersion: <b>-''</b>"
+            self.disp_cir_t.setText(resul_9)
+            resul_10 = "Mean Error: <b>-</b>"
+            self.emh_t.setText(resul_10)
+            resul_11 = "Standard Deviation: <br> <b>-</b>"
+            self.dsh_t.setText(resul_11)
+            resul_11 = "Circular Standard Deviation: <br> <b>-</b>"
+            self.dsc_t.setText(resul_11)
+            resul_12 = "Potencial Outlier (>): <b>-</b>"
+            self.pot_out_t.setText(resul_12)
+            resul_12 = "Total Outlier: <b>-</b>"
+            self.tot_out_t.setText(resul_12)
+            self.num_d.setText("Data Number: "+str(0))
+
+        title = QGraphicsSimpleTextItem("Skewness and Kurtosis (azimuth)")
+        title.setPos(10,10)
+        self.circular.addItem(title)
+
+    def qplotuni(self):
+        act_cde = self.cde.currentText()
+        self.circular.clear()
+        self.az_mean_c.setEnabled(False)
+        self.des_cir_c.setEnabled(False)
+        self.rem_out.setEnabled(False)
+
+        lis_az=list()
+        lis_az.clear()
+
+        if act_cde=="All":
+            for j in range(len(lista_cde)):
+                cd_selec = project.mapLayersByName(lista_cde[j])[0]
+                for i in cd_selec.getFeatures():
+                    attrs=i.attributes()
+                    az_feat = attrs[1]*(math.pi/180)
+                    lis_az.append(az_feat)
+        else:
+            cd_selec = project.mapLayersByName(str(act_cde))[0]
+            for i in cd_selec.getFeatures():
+                attrs=i.attributes()
+                az_feat = attrs[1]*(math.pi/180)
+                lis_az.append(az_feat)
+
+        lis_az_ord=sorted(lis_az)
+        cant=len(lis_az_ord)
+        datos=cant
+        self.num_d.setText("Data Number: "+str(datos))
+        
+        if cant>0:
+            viewprect = QRectF(self.grafic.viewport().rect())
+            ventana=viewprect
+            self.grafic.setSceneRect(viewprect)
+
+            left = self.grafic.sceneRect().left()
+            right = self.grafic.sceneRect().right()
+            width = right - left
+            top = self.grafic.sceneRect().top()
+            bottom = self.grafic.sceneRect().bottom()
+            height = (bottom - top)
+
+            size = width
+            if width > height:
+                size = height
+            padding = 15
+            maxlength = (size / 2) - padding * 2
+
+            ancho=maxlength
+            height = (bottom - top)*0.90
+            alto=height-height*0.02
+            alto2=(height/1.8)
+
+            center = QPoint(int(left + (width / 2)),int(top + (height / 2)))
+            # The scene geomatry of the center point
+            start = QPointF(self.grafic.mapToScene(center))
+
+            x0=0
+            y0=0
+            t=1
+            x=0
+            y=0
+
+            for i in lis_az_ord:
+                x = (2*ancho)*(t/(cant+1))
+                y = alto*(i/(2*math.pi))
+
+                linea_quan = QGraphicsLineItem(start.x()-ancho+x0, start.y()-y0+alto2, start.x()-ancho+x, start.y()-y+alto2)            
+                colour = self.Color_line.color()
+                myPen2 = QPen(colour)
+                myPen2.setWidth(2)
+                myPen2.setCapStyle(Qt.FlatCap)
+                linea_quan.setPen(myPen2)
+                self.circular.addItem(linea_quan)
+                x0=x
+                y0=y
+                t +=1
+
+            # Lineas Tendencia Uniforme
+            linea_ten = QGraphicsLineItem(start.x()-ancho, start.y()+alto2, start.x()-ancho+x, start.y()-y+alto2)            
+            colour = self.Color_mean.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(2)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_ten.setPen(myPen2)
+            self.circular.addItem(linea_ten)
+
+            # Lineas Verticales
+            linea_cua = QGraphicsLineItem(start.x()-ancho, start.y()+alto2, start.x()-ancho, start.y()-y+alto2)            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho+(x/4), start.y()+alto2, start.x()-ancho+(x/4), start.y()-y+alto2)            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho+x, start.y()+alto2, start.x()-ancho+x, start.y()-y+alto2)            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho+(3*x/4), start.y()+alto2, start.x()-ancho+(3*x/4), start.y()-y+alto2)            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho+(x/2), start.y()+alto2, start.x()-ancho+(x/2), start.y()-y+alto2)            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            # Lineas Horizontales
+            linea_cua = QGraphicsLineItem(start.x()-ancho, start.y()+alto2, start.x()-ancho+x, start.y()+alto2)            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho, start.y()+alto2-(y/2), start.x()-ancho+x, start.y()+alto2-(y/2))            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho, start.y()+alto2-y, start.x()-ancho+x, start.y()+alto2-y)            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho, start.y()+alto2-(3*y/4), start.x()-ancho+x, start.y()+alto2-(3*y/4))            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)        
+
+            linea_cua = QGraphicsLineItem(start.x()-ancho, start.y()+alto2-(y/4), start.x()-ancho+x, start.y()+alto2-(y/4))            
+            colour = self.Color_bin.color()
+            myPen2 = QPen(colour)
+            myPen2.setWidth(1)
+            myPen2.setCapStyle(Qt.FlatCap)
+            linea_cua.setPen(myPen2)
+            self.circular.addItem(linea_cua)  
+
+            # textos cuadricula horizontales
+            text2 = QGraphicsSimpleTextItem(str(0))
+            text2.setPos(start.x() - ancho,start.y()+8+alto2)
+            self.circular.addItem(text2)     
+
+            text2 = QGraphicsSimpleTextItem(str(1))
+            text2.setPos(start.x() - ancho + x,start.y()+8+alto2)
+            self.circular.addItem(text2)     
+
+            text2 = QGraphicsSimpleTextItem(str(0.50))
+            text2.setPos(start.x() - ancho + (x/2)-10,start.y()+8+alto2)
+            self.circular.addItem(text2)     
+
+            text2 = QGraphicsSimpleTextItem(str(0.25))
+            text2.setPos(start.x() - ancho + (x/4)-10,start.y()+8+alto2)
+            self.circular.addItem(text2) 
+
+            text2 = QGraphicsSimpleTextItem(str(0.75))
+            text2.setPos(start.x() - ancho + (3*x/4)-10,start.y()+8+alto2)
+            self.circular.addItem(text2) 
+
+            # textos cuadricula vericales
+            text2 = QGraphicsSimpleTextItem(str(0))
+            text2.setPos(start.x() - ancho - 20 ,start.y()+alto2-8)
+            self.circular.addItem(text2) 
+
+            text2 = QGraphicsSimpleTextItem(str(0.25))
+            text2.setPos(start.x() - ancho - 20 ,start.y()+alto2-(y/4)-8)
+            self.circular.addItem(text2) 
+
+            text2 = QGraphicsSimpleTextItem(str(0.50))
+            text2.setPos(start.x() - ancho - 20 ,start.y()+alto2-(y/2)-8)
+            self.circular.addItem(text2) 
+
+            text2 = QGraphicsSimpleTextItem(str(0.75))
+            text2.setPos(start.x() - ancho - 20 ,start.y()+alto2-(3*y/4)-8)
+            self.circular.addItem(text2) 
+
+            text2 = QGraphicsSimpleTextItem(str(1))
+            text2.setPos(start.x() - ancho - 20 ,start.y()+alto2-y-8)
+            self.circular.addItem(text2) 
+        else:
+            text2 = QGraphicsSimpleTextItem(str("No Data"))
+            text2.setPos(start.x(),start.y())
+            self.circular.addItem(text2) 
+
+            resul_1 = "Mean Azimuth: <b>-° -' -''</b>"
+            self.az_mean_t.setText(resul_1)
+            resul_2 = "Length of Mean Vector: <b>-</b>"
+            self.mod_med_t.setText(resul_2)
+            resul_3 = "Circular Variance: <b>-</b>"
+            self.var_cir_t.setText(resul_3)
+            resul_4 = "Circular Standard Deviation (Degree):<br> <b>-° -' -''</b>"
+            self.des_cir_t.setText(resul_4)
+            resul_4 = "Von Mises Concentration Parameter:<br> <b>-</b>"
+            self.par_k_t.setText(resul_4)
+            resul_13 = f"Angular Variance: <b>-</b>"
+            self.var_ang_t.setText(resul_13)
+            resul_5 = "Angular Standard Deviation:<br> <b>-° -' -''</b>"
+            self.des_ang_t.setText(resul_5)
+            resul_6 = "Mean Angular Deviation (Batschelet, 1981):<br> <b>-° -' -''</b>"
+            self.des_angm_t.setText(resul_6)
+            resul_7 = "Skewness Coefficient (Asimetry or bias): <br> <b>-</b>"
+            self.skew_t.setText(resul_7)
+            resul_8 = "Kurtosis Coefficient (Peakedness): <br> <b>-</b>"
+            self.curt_t.setText(resul_8)
+            resul_9 = "Circular Dispersion: <b>-''</b>"
+            self.disp_cir_t.setText(resul_9)
+            resul_10 = "Mean Error: <b>-</b>"
+            self.emh_t.setText(resul_10)
+            resul_11 = "Standard Deviation: <br> <b>-</b>"
+            self.dsh_t.setText(resul_11)
+            resul_11 = "Circular Standard Deviation: <br> <b>-</b>"
+            self.dsc_t.setText(resul_11)
+            resul_12 = "Potencial Outlier (>): <b>-</b>"
+            self.pot_out_t.setText(resul_12)
+            resul_12 = "Total Outlier: <b>-</b>"
+            self.tot_out_t.setText(resul_12)
+            self.num_d.setText("Data Number: "+str(0))
+
+        title = QGraphicsSimpleTextItem("Qplot Uniform Quantiles (azimuth)")
+        title.setPos(10,10)
+        self.circular.addItem(title)
+
+    def t_datos(self):
+        self.result=1
+        self.data.setSortingEnabled(True)
+        act_cde = self.cde.currentText()
+        lis_mod=list()
+        lis_mod.clear()
+        list_aci=list()
+        list_aci.clear()
+
+        if act_cde=="All":
+            for j in range(len(lista_cde)):
+                cd_selec = project.mapLayersByName(lista_cde[j])[0]
+                for i in cd_selec.getFeatures():
+                    attrs=i.attributes()
+                    lon_feat2 = attrs[0]
+                    azim_feat = attrs[1]
+                    lis_mod.append(lon_feat2)
+                    list_aci.append(azim_feat)  
+        else:
+            cd_selec = project.mapLayersByName(str(act_cde))[0]
+            for i in cd_selec.getFeatures():
+                attrs=i.attributes()
+                lon_feat2 = attrs[0]
+                azim_feat = attrs[1]
+                lis_mod.append(lon_feat2)
+                list_aci.append(azim_feat) 
+
+        self.data.clear()
+        self.data.setRowCount(len(lis_mod))
+        self.data.setColumnCount(4)            
+        self.data.setHorizontalHeaderItem(0, QTableWidgetItem("Module"))
+        self.data.setHorizontalHeaderItem(1, QTableWidgetItem("Azimuth"))
+        self.data.setHorizontalHeaderItem(2, QTableWidgetItem("Y"))
+        self.data.setHorizontalHeaderItem(3, QTableWidgetItem("X"))
+
+        data = QTableWidget()
+        self.data.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
+
+        x=0
+        for i in list_aci:
+            celda1 = QTableWidgetItem()
+            celda1.setData(QtCore.Qt.DisplayRole, round(lis_mod[x],3))
+
+            celda2 = QTableWidgetItem()
+            celda2.setData(QtCore.Qt.DisplayRole, round(list_aci[x],10))
+
+            dnorte = (math.cos(list_aci[x]*math.pi/180))*lis_mod[x]
+            celda3 = QTableWidgetItem()
+            celda3.setData(QtCore.Qt.DisplayRole, round(dnorte,3))
+
+            deste = (math.sin(list_aci[x]*math.pi/180))*lis_mod[x]
+            celda4 = QTableWidgetItem()
+            celda4.setData(QtCore.Qt.DisplayRole, round(deste,3))
+
+            self.data.setItem(x,0,celda1)
+            self.data.setItem(x,1,celda2)
+            self.data.setItem(x,2,celda3)
+            self.data.setItem(x,3,celda4)
+            x +=1 
+
+    # Redimensionar la ventana
+    def resizeEvent(self, event):
+        # self.showInfo("resizeEvent")
+        if self.result is not None:
+            self.redraw()
+
+    # Descargar los datos de los puntos.
+    def hab_desc(self):
+        if self.data_csv.filePath!="":
+            self.descarga.setEnabled(True)
+
+    def desc_data(self):
+        self.result=1
+        act_cde = self.cde.currentText()
+        ruta=self.data_csv.filePath()
+        self.data_csv.setSelectedFilter(".csv")
+
+        csv_archivo = str(ruta)+".csv"
+
+        fic = open(csv_archivo,'a')
+        fic.close()
+    
+        f = open (csv_archivo, 'w')
+        linea = "Module,Azimuth,Y,X\n"
+        f.write(linea)
+
+        if act_cde=="All":
+            for j in range(len(lista_cde)):
+                cd_selec = project.mapLayersByName(lista_cde[j])[0]
+                for i in cd_selec.getFeatures():
+                    attrs=i.attributes()
+                    lon_feat2 = attrs[0]
+                    azim_feat = attrs[1]
+                    dnorte = (math.cos(azim_feat*math.pi/180))*lon_feat2
+                    deste = (math.sin(azim_feat*math.pi/180))*lon_feat2
+                    linea = f"{lon_feat2},{azim_feat},{dnorte},{deste}\n"
+                    f.write(linea)
+        else:
+            cd_selec = project.mapLayersByName(str(act_cde))[0]
+            for i in cd_selec.getFeatures():
+                attrs=i.attributes()
+                lon_feat2 = attrs[0]
+                azim_feat = attrs[1]
+                dnorte = (math.cos(azim_feat*math.pi/180))*lon_feat2
+                deste = (math.sin(azim_feat*math.pi/180))*lon_feat2
+                linea = f"{lon_feat2},{azim_feat},{dnorte},{deste}\n"
+                f.write(linea)
+        f.close()
+
+        self.label_31.setText("<font style='color:#297500'><b>Successful download</b></font>")
+        self.data_csv.setFilePath("")
+        self.descarga.setEnabled(False) 
+
+    # Descaraga del informe de resultados
+    def hab_info(self):
+        if self.file_info.filePath!="":
+            self.gen_info.setEnabled(True)
+
+    def informe(self):
+        fecha_info=self.fecha.date()
+        ano=fecha_info.year()
+        mes=fecha_info.month()
+        dia=fecha_info.day()
+        proj=self.project_t.toPlainText()
+        self.result=1
+        act_cde = self.cde.currentText()
+        ruta=self.file_info.filePath()
+        self.file_info.setSelectedFilter(".html")
+        ruta_i=os.path.dirname(ruta)
+
+        info_archivo = str(ruta)+".html"
+
+        if len(imagen)>0:
+            if not os.path.exists(ruta_i+'/Imagenes'):
+                os.mkdir(ruta_i+'/Imagenes')
+            j=1
+            for i in imagen:
+                nom_imag=ruta_i+'/Imagenes/graficas'+str(j)+'.jpg'
+                img = QPixmap.fromImage(i)
+                img.save(nom_imag)
+                j +=1
+
+        fic = open(info_archivo,'a')
+        fic.close()
+    
+        f = open (info_archivo, 'w')
+        linea = "<!DOCTYPE html>\n<html>\n<head>\n<meta charset='utf-8'>\n<title>Resultado de Evaluación Calidad - Exactitud Posiocional</title>\n"
+        linea += "<style type='text/css'>\nbody {font-family: arial; margin: 5%;min-height: 100vh; max-width: 80%}\n"
+        linea += "table {border: 2px solid blue; border-collapse: collapse; font-family: arial; width: 80%;}\n"
+        linea += "td {padding: 5px;text-align: center;}"
+        linea += "font.over {text-decoration: overline;}"
+        linea += "</style></head>\n<body>\n"
+        linea += "<center><h2><i>QPositional</i></h2></center></p>\n"
+        linea += "<b>Date:</b> "+str(dia)+"/"+str(mes)+"/"+str(ano)+"</p>\n"
+        linea += "<b>Project:</b> "+proj+"</p>\n"
+
+
+        linea +="<center><b>Summary</b></center></p>\n"
+
+        linea += "<center><table border=1><tr><th>Dataset Evaluated</th><th>Dataset Source</th></tr>\n"
+        fila = 0
+        for registro in Layer_E:
+            celda1 = registro.name()
+            celda2 = Layer_F[fila].name()
+            linea += f"<tr><td>{celda1}</td><td>{celda2}</td></tr>\n"
+            fila +=1 
+        
+        linea += "</table></center></p>\n"
+
+        linea +="</p>"
+        linea +="<b><i>Circular Statistics (Azimuth)</i></b></p>\n"
+        linea +="<b>Central Tendency</b><br>\n"
+
+        minutos, grados = math.modf(az_med_t)
+        segundos, minutos = math.modf(minutos*60)
+        segundos = round(segundos*60,2)
+        cen_seg=str(round(segundos-int(segundos),2))[1:4]
+
+        linea += f"Mean Azimuth: <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b><br>\n"
+        linea += "<i>The direction <font class='over'>&theta;</font> of the vector resultant of &theta;<sub>1</sub>,..., &theta;<sub>n</sub> and is known as the mean direction (Fisher, 2000).</i><p>\n"
+
+        linea +="<b>Dispersion</b><br>\n"
+        linea += f"Length of Mean Vector: <b>{mod_med:.3f}</b><br>\n"
+        linea += "<i>Range (0,1), <font class='over'>R</font> = 1 implies that all the data points are coincident. However, <font class='over'>R</font> = 0 does not imply uniform dispersion around the circle (Fisher, 2000)</i></p>\n"
+
+        linea +=f"Circular Variance: <b>{var_cir:.3f}</b><br>\n"
+        linea += "<i>Range (0,1), the smaller the value of the circular variance, the more concentrated the distribution. However, V = 1 does not necessarily imply a maximally dispersed distribution.(Fisher, 2000)</i></p>\n"
+
+        minutos, grados = math.modf(des_cir)
+        segundos, minutos = math.modf(minutos*60)
+        segundos = round(segundos*60,2)
+        cen_seg=str(round(segundos-int(segundos),2))[1:4]
+        linea += f"Circular Standard Deviation: <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b><br>\n"
+        linea += "<i>The square root of the sample circular variance by analogy with the linear standard deviation.(Fisher, 2000)</i></p>\n"
+
+        linea += f"Angular Variance: <b>{var_ang:.3f}</b><br>\n"
+        linea += "<i>This can be considered a measure of dispersion, it's the analogy with the linear variance. (Robert P. Mahan, 1991)</i><p>\n"
+
+        minutos, grados = math.modf(desv_ang_med)
+        segundos, minutos = math.modf(minutos*60)
+        segundos = round(segundos*60,2)
+        cen_seg=str(round(segundos-int(segundos),2))[1:4]
+        linea += f"Mean Angular Deviation (Batschelet, 1981): <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b><br>\n"
+        linea +="<i>Taking the positive square root of angular variance. We can convert the angular deviation into degrees. (Robert P. Mahan, 1991)<i><p>\n"
+
+        minutos, grados = math.modf(desv_ang)
+        segundos, minutos = math.modf(minutos*60)
+        segundos = round(segundos*60,2)
+        cen_seg=str(round(segundos-int(segundos),2))[1:4]
+        linea += f"Angular Standard Deviation: <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b><br>\n"
+        linea += "<i></i></p>"
+
+
+        linea += f"Circular Dispersion: <b>{disp_cir:.3f}</b><br>\n"
+        linea += "<i>The circular dispersion plays an important role in calculating a confidence interval for a mean direction, and in comparing and combining several sample mean directions.(Fisher, 2000)</i></p>\n"
+
+        linea += f"Von Mises Concentration Parameter: <b>{par_k:.3f}</b><br>\n"
+        linea += "<i>This is a symmetric unimodal distribution which is the most common model for unimodal samples of circular data. (Fisher,2000)</i></p>\n"
+
+        linea +="<b>Shape</b><br>\n"
+        linea += f"Kurtosis Coefficient (Peakedness):  <b>{curt:.3f}</b><br>\n"
+        linea += "<i>Data from a unimodal symmetric distribution such as the von Mises will tend to have sample kurtosis values around zero; more peaked distributions will tend to have positive sample kurtosis. (Fisher, 2000)</i></p>\n"
+        
+        linea += f"Skewness Coefficient (Asimetry or Bias):  <b>{skew:.3f}</b><br>\n"
+        linea += "<i>Measures for skewness and kurtosis are meaningful only for unimodal distributions.</i><p>\n"
+
+        linea +="<b>Linear Statistics (Module)</b></p>\n"
+        linea += f"Mean Error: <b>{emh:.3f}</b><br>\n"
+        linea += "It`s the arithmetical mean of the error modules.<p>"
+
+        linea += f"Linear Standard Deviation:  <b>{desv_sta_l:.3f}</b><br>\n"
+        linea += "<i>The Linear Standard Deviation of measured differences (module) between the tested product and the reference source, this represents a confidence level of 68.27%. (Cihangir Akşit, E. 2010)</i></p>"
+        
+        linea += f"Circular Standard Deviation:  <b>{desv_sta_c:.3f}</b><br>\n"
+        linea += "<i>This deviation considers a certain percentage of the error in the two axes E (X) and N (Y) of the error vectors, estimated for both components together, This represents a confidence level of 39.35% (Cihangir Akşit, E. 2010)</i></p>"
+        
+        linea += f"Potencial Outlier (>): <b>{m2_desv:.3f}</b><br>\n" 
+        linea += "<i>A residual is considered to be a potential outlier (ie not part of the representative data set) if the absolute value of the residual is larger than a defined value. This value equates to the standard deviation of the observation multiplied by a statistical factor, M. (Cihangir Akşit, E. 2010)</i></p>"
+        
+        linea += f"Total Outlier: <b>{sum_out:.0f}</b><br>\n"
+        linea += "<i>The number of error vectors than their potential outlier is larger than the defined value</i></p>"
+
+        if self.idt.isChecked():
+            linea += "<center><b>Error Vector (Module and Azimuth)</b></center></p>\n"
+            linea += "<center><table border=1><tr><th>Module</th><th>Azimuth</th><th>Y</th><th>X</th></tr>\n"
+            if act_cde=="All":
+                for j in range(len(lista_cde)):
+                    cd_selec = project.mapLayersByName(lista_cde[j])[0]
+                    for i in cd_selec.getFeatures():
+                        attrs=i.attributes()
+                        lon_feat2 = attrs[0]
+                        azim_feat = attrs[1]
+                        dnorte = (math.cos(azim_feat*math.pi/180))*lon_feat2
+                        deste = (math.sin(azim_feat*math.pi/180))*lon_feat2
+                        linea += f"<tr><td>{lon_feat2}</td><td>{azim_feat}</td><td>{dnorte}</td><td>{deste}</td></tr>\n"
+            else:
+                cd_selec = project.mapLayersByName(str(act_cde))[0]
+                for i in cd_selec.getFeatures():
+                    attrs=i.attributes()
+                    lon_feat2 = attrs[0]
+                    azim_feat = attrs[1]
+                    dnorte = (math.cos(azim_feat*math.pi/180))*lon_feat2
+                    deste = (math.sin(azim_feat*math.pi/180))*lon_feat2
+                    linea += f"<tr><td>{lon_feat2}</td><td>{azim_feat}</td><td>{dnorte}</td><td>{deste}</td></tr>\n"
+            linea += "</table></center></p>\n"
+
+        if self.ilg.isChecked():
+            if len(imagen)>0:
+                j=1
+                for n in imagen:
+                    #image2 = Image.open(n)
+                    #qimage = ImageQt(image2)
+                    pixmap = ruta_i+'/Imagenes/graficas'+str(j)+'.jpg'
+                    linea += f"<img src='{pixmap}' /><br>\n"
+                    j +=1
+
+        linea += "</p><b><i>References</i></b><br>"
+        linea += "Fisher, N. I. (2000). Statistical analysis of circular data (Transferred to digital printing). Cambridge, Mass.: Cambridge University Press.<br>"
+        linea += "Mahan, R. P. (1991). Circular Statistical Methods: Applications in Spatial and Temporal Performance Analysis. United States Army Research Institute for the Behavioral and Social Sciences, Special Report 16.<br>"
+        linea += "Cihangir Akşit, E. (2010). Evaluation of Land Maps, Aeronautical Charts and Digital Topographic Data. NATO."
+
+        f.write(linea)
+        f.close()
+
+        self.label_32.setText("<font style='color:#297500'><b>Successful download</b></font>")
+        self.file_info.setFilePath("")
+        self.gen_info.setEnabled(False)
+
+
+    # Copiar al portapales
+    def clip(self):
+        QApplication.clipboard().setImage(QImage(QWidget.grab(QGraphicsView(self.circular))))
+        imag=QGuiApplication.clipboard().image()
+        imagen.append(imag)
+        self.ins_imag()
+        
+    # Save to SVG
+    def saveassvg(self, location=None):
+        savename = location
+        settings = QSettings()
+        key = '/UI/lastShapefileDir'
+        if not isinstance(savename, basestring):
+            outDir = settings.value(key)
+            filter = 'SVG (*.svg)'
+            savename, _filter = QFileDialog.getSaveFileName(self,"Save to SVG",outDir, filter)
+            savename = unicode(savename)
+        svgGen = QSvgGenerator()
+        svgGen.setFileName(savename)
+        svgGen.setSize(QSize(300, 300))
+        svgGen.setViewBox(QRect(0, 0, 301, 301))
+        painter = QPainter(svgGen)
+        self.circular.render(painter)
+        painter.end()
+
+        if savename:
+            outDir = os.path.dirname(savename)
+            settings.setValue(key, outDir)
+
+    def ins_imag(self):
+        if len(imagen)>0:
+            cant=len(imagen)
+            self.ilg.setEnabled(True)
+            text2=f"Include {cant} Graphics (Clipboard)"
+            self.ilg.setText(text2)
