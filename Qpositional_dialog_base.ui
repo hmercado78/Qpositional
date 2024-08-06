@@ -85,6 +85,9 @@
            <property name="text">
             <string>Restart</string>
            </property>
+           <property name="autoDefault">
+            <bool>false</bool>
+           </property>
           </widget>
          </item>
          <item>
@@ -116,7 +119,7 @@
          <bool>true</bool>
         </property>
         <property name="currentIndex">
-         <number>2</number>
+         <number>1</number>
         </property>
         <widget class="QWidget" name="tab">
          <attribute name="title">
@@ -223,7 +226,7 @@
             <item row="0" column="0">
              <widget class="QLabel" name="label_3">
               <property name="text">
-               <string>Dataset to be evaluated</string>
+               <string>Dataset evaluated</string>
               </property>
               <property name="alignment">
                <set>Qt::AlignCenter</set>
@@ -448,12 +451,12 @@
               <rect>
                <x>0</x>
                <y>362</y>
-               <width>82</width>
+               <width>121</width>
                <height>17</height>
               </rect>
              </property>
              <property name="text">
-              <string>Module hist</string>
+              <string>Module Histogram</string>
              </property>
             </widget>
             <widget class="QSpinBox" name="clas_mod">
@@ -462,9 +465,9 @@
              </property>
              <property name="geometry">
               <rect>
-               <x>78</x>
-               <y>360</y>
-               <width>45</width>
+               <x>65</x>
+               <y>385</y>
+               <width>51</width>
                <height>22</height>
               </rect>
              </property>
@@ -525,6 +528,32 @@ Kurtosis</string>
              <property name="text">
               <string>Qplot Uniform 
 Quantiles</string>
+             </property>
+            </widget>
+            <widget class="QLabel" name="label_33">
+             <property name="geometry">
+              <rect>
+               <x>10</x>
+               <y>390</y>
+               <width>47</width>
+               <height>13</height>
+              </rect>
+             </property>
+             <property name="text">
+              <string>Intervals</string>
+             </property>
+            </widget>
+            <widget class="QLabel" name="prueba">
+             <property name="geometry">
+              <rect>
+               <x>10</x>
+               <y>450</y>
+               <width>101</width>
+               <height>81</height>
+              </rect>
+             </property>
+             <property name="text">
+              <string>TextLabel</string>
              </property>
             </widget>
            </widget>
@@ -609,7 +638,7 @@ Quantiles</string>
                <property name="minimumSize">
                 <size>
                  <width>0</width>
-                 <height>35</height>
+                 <height>30</height>
                 </size>
                </property>
                <property name="frameShape">
@@ -619,6 +648,21 @@ Quantiles</string>
                 <enum>QFrame::Raised</enum>
                </property>
                <layout class="QHBoxLayout" name="horizontalLayout_8">
+                <property name="spacing">
+                 <number>4</number>
+                </property>
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>2</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>2</number>
+                </property>
                 <item>
                  <widget class="QCheckBox" name="az_mean_c">
                   <property name="text">
@@ -646,6 +690,82 @@ Quantiles</string>
                  </widget>
                 </item>
                </layout>
+              </widget>
+             </item>
+             <item>
+              <widget class="QFrame" name="frame_30">
+               <property name="minimumSize">
+                <size>
+                 <width>125</width>
+                 <height>35</height>
+                </size>
+               </property>
+               <property name="frameShape">
+                <enum>QFrame::NoFrame</enum>
+               </property>
+               <property name="frameShadow">
+                <enum>QFrame::Raised</enum>
+               </property>
+               <layout class="QHBoxLayout" name="horizontalLayout_9">
+                <property name="spacing">
+                 <number>4</number>
+                </property>
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>2</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>2</number>
+                </property>
+                <item>
+                 <widget class="QLabel" name="label_35">
+                  <property name="text">
+                   <string>Rounded</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QSpinBox" name="red_mode_s">
+                  <property name="enabled">
+                   <bool>false</bool>
+                  </property>
+                  <property name="maximum">
+                   <number>5</number>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QLabel" name="az_mode_t">
+                  <property name="minimumSize">
+                   <size>
+                    <width>125</width>
+                    <height>15</height>
+                   </size>
+                  </property>
+                  <property name="text">
+                   <string>mode</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="az_median_t">
+               <property name="minimumSize">
+                <size>
+                 <width>125</width>
+                 <height>20</height>
+                </size>
+               </property>
+               <property name="text">
+                <string>median</string>
+               </property>
               </widget>
              </item>
              <item>
@@ -1469,6 +1589,34 @@ Quantiles</string>
                  <number>8</number>
                 </property>
                 <item>
+                 <widget class="QLabel" name="label_34">
+                  <property name="sizePolicy">
+                   <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                    <horstretch>0</horstretch>
+                    <verstretch>0</verstretch>
+                   </sizepolicy>
+                  </property>
+                  <property name="minimumSize">
+                   <size>
+                    <width>0</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="sizeIncrement">
+                   <size>
+                    <width>0</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="text">
+                   <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;COLORS&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                  </property>
+                  <property name="alignment">
+                   <set>Qt::AlignCenter</set>
+                  </property>
+                 </widget>
+                </item>
+                <item>
                  <widget class="QFrame" name="frame_18">
                   <property name="frameShape">
                    <enum>QFrame::NoFrame</enum>
@@ -1689,7 +1837,7 @@ Quantiles</string>
                     </rect>
                    </property>
                    <property name="text">
-                    <string>Desviation</string>
+                    <string>Deviation</string>
                    </property>
                   </widget>
                   <widget class="QgsColorButton" name="Color_desv">
@@ -1824,7 +1972,7 @@ Quantiles</string>
              <item>
               <widget class="QLabel" name="label_29">
                <property name="text">
-                <string>Project:</string>
+                <string>Project Description:</string>
                </property>
               </widget>
              </item>

@@ -52,7 +52,6 @@ from PyQt5 import QtCore
 import threading
 from datetime import datetime
 from qgis.PyQt.QtSvg import QSvgGenerator
-from PyQt5.QtGui import QClipboard, QGuiApplication
 
 
 # Se instancia el proyecto
@@ -99,6 +98,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         self.tabWidget.setTabEnabled(2,False)
         self.tabWidget.setTabEnabled(3,False)
         self.tabWidget.setTabEnabled(4,False)
+        self.tabWidget.currentChanged.connect(self.camb_text)
         self.circular = QGraphicsScene(self)
         self.grafic.setScene(self.circular)
         self.cde.currentTextChanged.connect(self.redraw)
@@ -115,6 +115,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         self.Bt_asicur.clicked.connect(self.asi_cur)
         self.Bt_qplotu.clicked.connect(self.qplotuni)
         self.clas_mod.valueChanged[int].connect(self.hist_mod)
+        self.red_mode_s.valueChanged[int].connect(self.redraw)
         self.result = None
         self.gen_info.clicked.connect(self.informe)
         self.descarga.clicked.connect(self.desc_data)
@@ -124,6 +125,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         self.descarga.setEnabled(False)
         self.copygraf.clicked.connect(self.clip)
         self.savesvg.clicked.connect(self.saveassvg)
+        self.b_undo.clicked.connect(self.f_undo)
 
         grupo = "Temporal"
         root = project.layerTreeRoot()
@@ -144,6 +146,10 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
 
         global var_rest
         var_rest=""
+
+        global lon_feat
+        lon_feat=0
+
 
     def SLayer_E1(self):
         global cont
@@ -623,6 +629,8 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         if not var_rest=="SI":
             self.cir_unit()
 
+        self.b_undo.setEnabled(False)
+
 
     # calculo de la distancia y azimut
     def dist_Az(self):
@@ -680,19 +688,25 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
     def redraw(self):
         self.tabWidget.setCurrentIndex(2)
         if self.mod_hist_c.isChecked():
+            self.cde.setEnabled(False)
+            self.t_datos()
             self.hist_mod()
-            self.t_datos()
         if self.Bt_asicur.isChecked():
+            self.cde.setEnabled(False)
+            self.t_datos()
             self.asi_cur()
-            self.t_datos()
         if self.Bt_qplotu.isChecked():
-            self.qplotuni()
+            self.cde.setEnabled(False)
             self.t_datos()
+            self.qplotuni()
         if self.cir_dist_c.isChecked():
+            self.cde.setEnabled(True)
             self.cir_unit()
         if self.cir_unit_c.isChecked():
+            self.cde.setEnabled(True)
             self.cir_unit()
         if self.den_gra_c.isChecked():
+            self.cde.setEnabled(True)
             self.cir_unit()
 
     def cir_unit(self):
@@ -700,9 +714,11 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         self.tabWidget.setTabEnabled(3,True)
         self.tabWidget.setTabEnabled(4,True)
         self.tabWidget.setCurrentIndex(2)
+        self.red_mode_s.setEnabled(True)
         self.clas_mod.setEnabled(False)
         self.az_mean_c.setEnabled(True)
         self.des_cir_c.setEnabled(True)
+        self.cde.setEnabled(True)
 
         self.circular.clear()
         self.result=1
@@ -741,8 +757,16 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
 
         list_aci = list()
         list_aci.clear()
+        global list_aci_o
+        list_aci_o = list()
         c=dict()
         global lista_cde
+        global az_med
+        global az_med_t
+        global az_median
+        global az_mode
+        global azim_feat
+        lon_feat=0
 
         if act_cde=="All":
             lista_cde = nom_cde
@@ -752,13 +776,11 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             max_total=0
             j=0
             for j in range(len(lista_cde)):
+                self.progressBar.setValue(100*((j+1)/(len(lista_cde))))
                 cd_selec = project.mapLayersByName(lista_cde[j])[0]
                 maxi_dist = cd_selec.maximumValue(0)
                 if maxi_dist>max_total:
                     max_total=maxi_dist
-
-            global az_med
-            global az_med_t
 
             sen_az_t=0
             cos_az_t=0
@@ -766,16 +788,18 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             cos_az_t2=0
             datos=0
             sum_dist = 0
-
+            list_aci_o.clear()
             lon_max=0
             lon_feat_max=0        
             for j in range(len(lista_cde)):
+                self.progressBar.setValue(100*((j+1)/(len(lista_cde))))
                 cd_selec = project.mapLayersByName(lista_cde[j])[0]
                 for i in cd_selec.getFeatures():
                     if self.cir_unit_c.isChecked():
                         attrs=i.attributes()
                         lon_feat = attrs[0]
                         azim_feat = attrs[1]
+                        list_aci_o.append(azim_feat)
                         azim_feat_e = round(azim_feat,0)
                         c.clear()
                         c = collections.Counter(list_aci)
@@ -802,6 +826,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                         attrs=i.attributes()
                         lon_feat = attrs[0]
                         azim_feat = attrs[1]
+                        list_aci_o.append(azim_feat)
                         lon = lon_feat*(radius/max_total)
                         if lon_max<lon:
                             lon_max=lon
@@ -820,6 +845,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                         attrs=i.attributes()
                         lon_feat = attrs[0]
                         azim_feat = attrs[1]
+                        list_aci_o.append(azim_feat)
                         lon = lon_feat*(radius/max_total)
                         if lon_max<lon:
                             lon_max=lon
@@ -930,6 +956,68 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
 
             self.num_d.setText("Data Number: "+str(datos))
 
+            
+            # Calculate Median
+            list_aci_ord=sorted(list_aci_o)
+            val_dm=dict()
+            anterior=""
+            for i in range(len(list_aci_ord)):
+                self.progressBar.setValue(100*((i+1)/(len(list_aci_ord))))
+                sum_val=0
+                for j in range(len(list_aci_ord)):
+                    val=abs(math.pi-abs((list_aci_ord[j]*math.pi/180)-(list_aci_ord[i]*math.pi/180)))
+                    sum_val=sum_val+val
+                val_m=sum_val/len(list_aci_ord)
+                val_dm[list_aci_ord[i]]=math.pi-val_m
+            mediana=""
+            min_val_dm=val_dm[list_aci_ord[0]]
+            for i in val_dm:
+                if min_val_dm>val_dm[i]:
+                    min_val_dm=val_dm[i]
+                    mediana=i
+            num_med=0
+            sum_med=0
+            for i in val_dm:
+                if min_val_dm==val_dm[i]:
+                    sum_med+=i
+                    num_med+=1
+                    ant_val=anterior
+                anterior=i
+
+            if num_med==1:
+                if (len(list_aci_ord) % 2) == 0:
+                    cont=0
+                    for i in list_aci_ord:
+                        if sum_med==i:
+                            cont+=1                
+                    if cont==1:
+                        az_median=((sum_med+ant_val)/2)
+                    else:
+                        az_median=(sum_med/num_med)
+                else:
+                    az_median=(sum_med/num_med)
+            else:
+                az_median=(sum_med/num_med)
+
+
+            #Calculate Mode
+            red=self.red_mode_s.value()
+            clases=360*(10**red)
+            x_red=list()
+            x_red.clear()
+            cont=0
+            for i in list_aci_ord:
+                x_red.append(round(i,red))
+            frecuencias, extremos = np.histogram(x_red, bins=clases)
+            f_moda=max(frecuencias)
+            pos_max=0
+            cont=0
+            for i in frecuencias:
+                if i==f_moda: 
+                    pos_max=cont
+                    az_mode=(extremos[cont]+extremos[cont+1])/2
+                cont+=1          
+            
         else:
             if act_cde!="":
                 cd_selec = project.mapLayersByName(str(act_cde))[0]
@@ -943,12 +1031,14 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                 sum_dist=0
                 lon_max=0
                 lon_feat_max=0
+                list_aci_o.clear()
                 for i in cd_selec.getFeatures():
                     if len(cd_selec)>0:
                         if self.cir_unit_c.isChecked():
                             attrs=i.attributes()
                             lon_feat = attrs[0]
                             azim_feat = attrs[1]
+                            list_aci_o.append(azim_feat)
                             azim_feat_e = round(azim_feat,0)
                             c.clear()
                             c = collections.Counter(list_aci)
@@ -975,6 +1065,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                             attrs=i.attributes()
                             lon_feat = attrs[0]
                             azim_feat = attrs[1]
+                            list_aci_o.append(azim_feat)
                             lon = lon_feat*(radius/max_total)
                             if lon_max<lon:
                                 lon_max=lon
@@ -993,6 +1084,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                             attrs=i.attributes()
                             lon_feat = attrs[0]
                             azim_feat = attrs[1]
+                            list_aci_o.append(azim_feat)
                             lon = lon_feat*(radius/max_total)
                             if lon_max<lon:
                                 lon_max=lon
@@ -1045,67 +1137,173 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                         self.rem_out.setEnabled(False)
 
 
-                # Calculo del azimut medio
-                if datos!=0:    
-                    if cos_az_t==0:
-                        az_med=(math.pi/2)
-                    else:
-                        az_med = math.atan(sen_az_t/cos_az_t)
-
-                    if cos_az_t==0 or sen_az_t==0:
+                if len(cd_selec)>0:
+                    # Calculo del azimut medio
+                    if datos!=0:    
                         if cos_az_t==0:
-                            if sen_az_t>0:
-                                az_med=(math.pi/2)
-                            else:
-                                az_med=(math.pi/2)+math.pi
+                            az_med=(math.pi/2)
                         else:
-                            if cos_az_t>0:
-                                az_med=0
-                            else:
-                                az_med=(math.pi)
-                    else:    
-                        if cos_az_t>0 and sen_az_t>0:
-                            az_med=az_med
-                        if cos_az_t<0 and sen_az_t>0:
-                            az_med=math.pi+az_med
-                        if cos_az_t<0 and sen_az_t<0:
-                            az_med=math.pi+az_med
-                        if cos_az_t>0 and sen_az_t<0:
-                            az_med=(2*math.pi)+az_med
-                else:
-                    az_med=""
+                            az_med = math.atan(sen_az_t/cos_az_t)
 
-                #Calculo del acimut medio doble 
-                if datos!=0:
-                    if cos_az_t2==0:
-                        az_med2=(math.pi/2)
+                        if cos_az_t==0 or sen_az_t==0:
+                            if cos_az_t==0:
+                                if sen_az_t>0:
+                                    az_med=(math.pi/2)
+                                else:
+                                    az_med=(math.pi/2)+math.pi
+                            else:
+                                if cos_az_t>0:
+                                    az_med=0
+                                else:
+                                    az_med=(math.pi)
+                        else:    
+                            if cos_az_t>0 and sen_az_t>0:
+                                az_med=az_med
+                            if cos_az_t<0 and sen_az_t>0:
+                                az_med=math.pi+az_med
+                            if cos_az_t<0 and sen_az_t<0:
+                                az_med=math.pi+az_med
+                            if cos_az_t>0 and sen_az_t<0:
+                                az_med=(2*math.pi)+az_med
                     else:
-                        az_med2 = math.atan(sen_az_t2/cos_az_t2)
+                        az_med=""
 
-                    if cos_az_t2==0 or sen_az_t2==0:
+                    #Calculo del acimut medio doble 
+                    if datos!=0:
                         if cos_az_t2==0:
-                            if sen_az_t2>0:
-                                az_med2=(math.pi/2)
-                            else:
-                                az_med2=(math.pi/2)+math.pi
+                            az_med2=(math.pi/2)
                         else:
-                            if cos_az_t2>0:
-                                az_med2=0
-                            else:
-                                az_med2=(math.pi)
-                    else:    
-                        if cos_az_t2>0 and sen_az_t2>0:
-                            az_med2=az_med2
-                        if cos_az_t2<0 and sen_az_t2>0:
-                            az_med2=math.pi+az_med2
-                        if cos_az_t2<0 and sen_az_t2<0:
-                            az_med2=math.pi+az_med2
-                        if cos_az_t2>0 and sen_az_t2<0:
-                            az_med2=(2*math.pi)+az_med2
-                else:
-                    az_med2=""
+                            az_med2 = math.atan(sen_az_t2/cos_az_t2)
 
-                self.num_d.setText("Data Number: "+str(datos))
+                        if cos_az_t2==0 or sen_az_t2==0:
+                            if cos_az_t2==0:
+                                if sen_az_t2>0:
+                                    az_med2=(math.pi/2)
+                                else:
+                                    az_med2=(math.pi/2)+math.pi
+                            else:
+                                if cos_az_t2>0:
+                                    az_med2=0
+                                else:
+                                    az_med2=(math.pi)
+                        else:    
+                            if cos_az_t2>0 and sen_az_t2>0:
+                                az_med2=az_med2
+                            if cos_az_t2<0 and sen_az_t2>0:
+                                az_med2=math.pi+az_med2
+                            if cos_az_t2<0 and sen_az_t2<0:
+                                az_med2=math.pi+az_med2
+                            if cos_az_t2>0 and sen_az_t2<0:
+                                az_med2=(2*math.pi)+az_med2
+                    else:
+                        az_med2=""
+
+                    self.num_d.setText("Data Number: "+str(datos))
+
+                    
+                    # Calculate Median
+                    list_aci_ord=sorted(list_aci_o)
+                    val_dm=dict()
+                    anterior=""
+                    for i in range(len(list_aci_ord)):
+                        sum_val=0
+                        self.progressBar.setValue(100*((i+1)/(len(list_aci_ord))))
+                        for j in range(len(list_aci_ord)):
+                            val=abs(math.pi-abs((list_aci_ord[j]*math.pi/180)-(list_aci_ord[i]*math.pi/180)))
+                            sum_val=sum_val+val
+                        val_m=sum_val/len(list_aci_ord)
+                        val_dm[list_aci_ord[i]]=math.pi-val_m
+                    mediana=""
+                    min_val_dm=val_dm[list_aci_ord[0]]
+                    for i in val_dm:
+                        if min_val_dm>val_dm[i]:
+                            min_val_dm=val_dm[i]
+                            mediana=i
+                    num_med=0
+                    sum_med=0
+                    for i in val_dm:
+                        if min_val_dm==val_dm[i]:
+                            sum_med+=i
+                            num_med+=1
+                            ant_val=anterior
+                        anterior=i
+
+                    if num_med==1:
+                        if (len(list_aci_ord) % 2) == 0:
+                            cont=0
+                            for i in list_aci_ord:
+                                if sum_med==i:
+                                    cont+=1                
+                            if cont==1:
+                                az_median=((sum_med+ant_val)/2)
+                            else:
+                                az_median=(sum_med/num_med)
+                        else:
+                            az_median=(sum_med/num_med)
+                    else:
+                        az_median=(sum_med/num_med)
+                    
+
+                    #Calculate Mode
+                    red=self.red_mode_s.value()
+                    clases=360*(10**red)
+                    x_red=list()
+                    x_red.clear()
+                    cont=0
+                    for i in list_aci_ord:
+                        x_red.append(round(i,red))
+                    frecuencias, extremos = np.histogram(x_red, bins=clases)
+                    f_moda=max(frecuencias)
+                    pos_max=0
+                    cont=0
+                    for i in frecuencias:
+                        if i==f_moda: 
+                            pos_max=cont
+                            az_mode=(extremos[cont]+extremos[cont+1])/2
+                        cont+=1    
+                else:
+                    resul_1 = "Data Number: 0"
+                    self.num_d.setText(resul_1)
+                    resul_1 = "Mean Azimuth: <b>-° -' -''</b>"
+                    self.az_mean_t.setText(resul_1)
+                    resul_7 = "Median Azimuth: <b>-° -' -''</b>"
+                    self.az_median_t.setText(resul_7)
+                    resul_7 = "Mode Azimuth: <b>-° -' -''</b>"
+                    self.az_mode_t.setText(resul_7)
+                    resul_2 = "Length of Mean Vector: <b>-</b>"
+                    self.mod_med_t.setText(resul_2)
+                    resul_3 = "Circular Variance: <b>-</b>"
+                    self.var_cir_t.setText(resul_3)
+                    resul_4 = "Circular Standard Deviation (Degree):<br> <b>-° -' -''</b>"
+                    self.des_cir_t.setText(resul_4)
+                    resul_13 = f"Angular Variance: <b>-</b>"
+                    self.var_ang_t.setText(resul_13)
+                    resul_4 = "Von Mises Concentration Parameter:<br> <b>-</b>"
+                    self.par_k_t.setText(resul_4)
+                    resul_5 = "Angular Standard Deviation:<br> <b>-° -' -''</b>"
+                    self.des_ang_t.setText(resul_5)
+                    resul_6 = "Mean Angular Deviation:<br> <b>-° -' -''</b>"
+                    self.des_angm_t.setText(resul_6)
+                    resul_7 = "Skewness Coefficient (Asimetry or bias): <br> <b>-</b>"
+                    self.skew_t.setText(resul_7)
+                    resul_8 = "Kurtosis Coefficient (Peakedness): <br> <b>-</b>"
+                    self.curt_t.setText(resul_8)
+                    resul_9 = "Circular Dispersion: <b>-''</b>"
+                    self.disp_cir_t.setText(resul_9)
+                    resul_10 = "Mean Error: <b>-</b>"
+                    self.emh_t.setText(resul_10)
+                    resul_11 = "Standard Deviation: <br> <b>-</b>"
+                    self.dsh_t.setText(resul_11)
+                    resul_11 = "Circular Standard Deviation: <br> <b>-</b>"
+                    self.dsc_t.setText(resul_11)
+                    resul_12 = "Potencial Outlier (>): <b>-</b>"
+                    self.pot_out_t.setText(resul_12)
+                    resul_12 = "Total Outlier: <b>-</b>"
+                    self.tot_out_t.setText(resul_12)
+                    text2 = QGraphicsSimpleTextItem(str("No Data"))
+                    text2.setPos(start.x(),start.y())
+                    self.circular.addItem(text2) 
+
 
         if act_cde!="":
             if self.cir_unit_c.isChecked() or self.cir_dist_c.isChecked():
@@ -1175,9 +1373,11 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                 global m2_desv
                 global sum_out
 
+
                 if datos==0:
                     grados,minutos,segundos=""
 
+                # Mean
                 minutos, grados = math.modf(az_med_t)
                 segundos, minutos = math.modf(minutos*60)
                 segundos = round(segundos*60,2)
@@ -1189,10 +1389,32 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                 else:
                     self.long_a.setText(str(round((lon_feat_max)/numrings,2)))
 
+
+                # Median
+                minutos, grados = math.modf(az_median)
+                segundos, minutos = math.modf(minutos*60)
+                segundos = round(segundos*60,2)
+                cen_seg=str(round(segundos-int(segundos),2))[1:4]
+                resul_7 = f"Median Azimuth: <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b>"
+                self.az_median_t.setText(resul_7)
+
+
                 # Modulo medio
                 mod_med = (((cos_az_t**2)+(sen_az_t**2))**0.5)/datos
                 resul_2 = f"Length of Mean Vector: <b>{mod_med:.3f}</b>"
                 self.mod_med_t.setText(resul_2)
+
+                # Mode
+                if mod_med>=0.5:
+                    minutos, grados = math.modf(round(az_mode,red))
+                    segundos, minutos = math.modf(minutos*60)
+                    segundos = round(segundos*60,2)
+                    cen_seg=str(round(segundos-int(segundos),2))[1:4]
+                    resul_7 = f"Mode Azimuth: <br><b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b>"
+                else:
+                    resul_7="Mode Azimuth: <br>Does not apply"
+                    self.red_mode_s.setEnabled(False)
+                self.az_mode_t.setText(resul_7)
 
                 # Modulo medio doble
                 mod_med2 = (((cos_az_t2**2)+(sen_az_t2**2))**0.5)/datos
@@ -1267,6 +1489,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                 sum_ang = 0
                 if act_cde=="All":
                     for j in range(len(lista_cde)):
+                        self.progressBar.setValue(100*((j+1)/(len(lista_cde))))
                         cd_selec = project.mapLayersByName(lista_cde[j])[0]
                         for i in cd_selec.getFeatures():
                             attrs=i.attributes()
@@ -1296,7 +1519,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                 segundos, minutos = math.modf(minutos*60)
                 segundos = round(segundos*60,2)
                 cen_seg=str(round(segundos-int(segundos),2))[1:4]
-                resul_6 = f"Mean Angular Deviation (Batschelet, 1981):<br> <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b>"
+                resul_6 = f"Mean Angular Deviation:<br> <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b>"
                 self.des_angm_t.setText(resul_6)
 
                 # Coeficiente de Asimetría (skewness o sesgo)
@@ -1336,6 +1559,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                 sum_long=0
                 if act_cde=="All":
                     for j in range(len(lista_cde)):
+                        self.progressBar.setValue(100*((j+1)/(len(lista_cde))))
                         cd_selec = project.mapLayersByName(lista_cde[j])[0]
                         for i in cd_selec.getFeatures():
                             attrs=i.attributes()
@@ -1369,6 +1593,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                 sum_lon2=0
                 if act_cde=="All":
                     for j in range(len(lista_cde)):
+                        self.progressBar.setValue(100*((j+1)/(len(lista_cde))))
                         cd_selec = project.mapLayersByName(lista_cde[j])[0]
                         for i in cd_selec.getFeatures():
                             attrs=i.attributes()
@@ -1427,6 +1652,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                 sum_out=0
                 if act_cde=="All":
                     for j in range(len(lista_cde)):
+                        self.progressBar.setValue(100*((j+1)/(len(lista_cde))))
                         cd_selec = project.mapLayersByName(lista_cde[j])[0]
                         for i in cd_selec.getFeatures():
                             attrs=i.attributes()
@@ -1473,8 +1699,14 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                     self.rem_out.setEnabled(False)
 
         else:
+            resul_1 = "Data Number: 0"
+            self.num_d.setText(resul_1)
             resul_1 = "Mean Azimuth: <b>-° -' -''</b>"
             self.az_mean_t.setText(resul_1)
+            resul_7 = "Median Azimuth: <b>-° -' -''</b>"
+            self.az_median_t.setText(resul_7)
+            resul_7 = "Mode Azimuth: <b>-° -' -''</b>"
+            self.az_mode_t.setText(resul_7)
             resul_2 = "Length of Mean Vector: <b>-</b>"
             self.mod_med_t.setText(resul_2)
             resul_3 = "Circular Variance: <b>-</b>"
@@ -1487,7 +1719,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             self.par_k_t.setText(resul_4)
             resul_5 = "Angular Standard Deviation:<br> <b>-° -' -''</b>"
             self.des_ang_t.setText(resul_5)
-            resul_6 = "Mean Angular Deviation (Batschelet, 1981):<br> <b>-° -' -''</b>"
+            resul_6 = "Mean Angular Deviation:<br> <b>-° -' -''</b>"
             self.des_angm_t.setText(resul_6)
             resul_7 = "Skewness Coefficient (Asimetry or bias): <br> <b>-</b>"
             self.skew_t.setText(resul_7)
@@ -1642,6 +1874,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         act_cde = self.cde.currentText()
         if act_cde=="All":
             for j in range(len(lista_cde)):
+                self.progressBar.setValue(100*((j+1)/(len(lista_cde))))
                 cd_selec = project.mapLayersByName(lista_cde[j])[0]
                 for i in cd_selec.getFeatures():
                     attrs=i.attributes()
@@ -1653,6 +1886,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                     if res>=m2_desv:
                         cd_selec.dataProvider().deleteFeatures([i.id()])
                         cd_selec.updateFeature(i)
+
         else:
             cd_selec = project.mapLayersByName(str(act_cde))[0]
             for i in cd_selec.getFeatures():
@@ -1667,10 +1901,27 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                     cd_selec.updateFeature(i)
 
         self.redraw()
+        
+        self.b_undo.setEnabled(True)
+
+
+    def f_undo(self):
+        self.cde.clear()
+
+        root2 = QgsProject.instance().layerTreeRoot()
+        grupo2 = (root2.findGroup("Temporal"))
+
+        for child in grupo2.children():
+            capa=QgsProject.instance().mapLayersByName(child.name())
+            if "Error" in capa[0].name():
+                QgsProject.instance().removeMapLayer(capa[0].id())
+
+        self.paso3()
 
 
     def hist_mod(self):
         self.clas_mod.setEnabled(True)
+        self.red_mode_s.setEnabled(False)
         clas=self.clas_mod.value()
         act_cde = self.cde.currentText()
         self.az_mean_c.setEnabled(False)
@@ -1682,6 +1933,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
 
         if act_cde=="All":
             for j in range(len(lista_cde)):
+                self.progressBar.setValue(100*((j+1)/(len(lista_cde))))
                 cd_selec = project.mapLayersByName(lista_cde[j])[0]
                 for i in cd_selec.getFeatures():
                     attrs=i.attributes()
@@ -1745,13 +1997,21 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
                 linea_quan = QGraphicsLineItem(start.x()-ancho+x0, start.y()-y0+alto2, start.x()-ancho+x, start.y()-y+alto2)            
                 colour = self.Color_line.color()
                 myPen2 = QPen(colour)
-                myPen2.setWidth(2)
+                myPen2.setWidth(1)
                 myPen2.setCapStyle(Qt.FlatCap)
                 linea_quan.setPen(myPen2)
                 self.circular.addItem(linea_quan)
                 x0=x
                 y0=y
                 t +=1
+
+                linea_frec = QGraphicsLineItem(start.x()-ancho+x, start.y()+alto2, start.x()-ancho+x, start.y()-y+alto2)            
+                colour = self.Color_dot.color()
+                myPen2 = QPen(colour)
+                myPen2.setWidth(4+(1/(clas/100)))
+                myPen2.setCapStyle(Qt.FlatCap)
+                linea_frec.setPen(myPen2)
+                self.circular.addItem(linea_frec)
 
             # Lineas Verticales
             linea_cua = QGraphicsLineItem(start.x()-ancho, start.y()+alto2, start.x()-ancho, start.y()-alto2)            
@@ -1856,6 +2116,10 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             text2.setPos(start.x() - ancho + (3*x/4)-10,start.y()+8+alto2)
             self.circular.addItem(text2) 
 
+            text2 = QGraphicsSimpleTextItem(str("Module"))
+            text2.setPos(start.x() - ancho + (x)+50,start.y()+8+alto2)
+            self.circular.addItem(text2) 
+
             text2 = QGraphicsSimpleTextItem(str(0))
             text2.setPos(start.x() - ancho - 20 ,start.y()+alto2)
             self.circular.addItem(text2) 
@@ -1875,13 +2139,26 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             text2 = QGraphicsSimpleTextItem(str(frecuencias[0]))
             text2.setPos(start.x() - ancho - 20 ,start.y()-alto2)
             self.circular.addItem(text2) 
+
+            text2 = QGraphicsSimpleTextItem(str("Frecuency"))
+            text2.setPos(start.x() - ancho - 40 ,start.y())
+            text2.setRotation(270)
+            self.circular.addItem(text2) 
+
+
         else:
             text2 = QGraphicsSimpleTextItem(str("No Data"))
             text2.setPos(start.x(),start.y())
             self.circular.addItem(text2) 
 
+            resul_1 = "Data Number: 0"
+            self.num_d.setText(resul_1)
             resul_1 = "Mean Azimuth: <b>-° -' -''</b>"
             self.az_mean_t.setText(resul_1)
+            resul_7 = "Median Azimuth: <b>-° -' -''</b>"
+            self.az_median_t.setText(resul_7)
+            resul_7 = "Mode Azimuth: <b>-° -' -''</b>"
+            self.az_mode_t.setText(resul_7)
             resul_2 = "Length of Mean Vector: <b>-</b>"
             self.mod_med_t.setText(resul_2)
             resul_3 = "Circular Variance: <b>-</b>"
@@ -1894,7 +2171,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             self.par_k_t.setText(resul_4)
             resul_5 = "Angular Standard Deviation:<br> <b>-° -' -''</b>"
             self.des_ang_t.setText(resul_5)
-            resul_6 = "Mean Angular Deviation (Batschelet, 1981):<br> <b>-° -' -''</b>"
+            resul_6 = "Mean Angular Deviation:<br> <b>-° -' -''</b>"
             self.des_angm_t.setText(resul_6)
             resul_7 = "Skewness Coefficient (Asimetry or bias): <br> <b>-</b>"
             self.skew_t.setText(resul_7)
@@ -1925,12 +2202,14 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         self.az_mean_c.setEnabled(False)
         self.des_cir_c.setEnabled(False)
         self.rem_out.setEnabled(False)
+        self.cde.setEnabled(False)
 
         lis_az=list()
         lis_az.clear()
 
         if act_cde=="All":
             for j in range(len(lista_cde)):
+                self.progressBar.setValue(100*((j+1)/(len(lista_cde))))
                 cd_selec = project.mapLayersByName(lista_cde[j])[0]
                 for i in cd_selec.getFeatures():
                     attrs=i.attributes()
@@ -1981,6 +2260,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
 
             ancho=maxlength
             alto=(height/3)
+            alto2=(height/2.01)
 
             center = QPoint(int(left + (width / 2)),int(top + (height / 2)))
             # The scene geomatry of the center point
@@ -1995,65 +2275,62 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             linea_base.setPen(myPen2)
             self.circular.addItem(linea_base)
 
-            linea_mean = QGraphicsLineItem(start.x(), start.y()+alto, start.x(), start.y()+alto-ancho)            
-            colour2 = self.Color_mean.color()
-            myPen2 = QPen(colour2)
-            myPen2.setWidth(2)
-            myPen2.setCapStyle(Qt.FlatCap)
-            linea_mean.setPen(myPen2)
-            self.circular.addItem(linea_mean)
-
             if (az_max-az_min)!=0:
                 qt_polygon = QPolygonF()
 
                 ind=np.where(extremos==az_med_i)
                 ind=ind[0][0]
-                ind_i=ind-int(round(len(extremos)/2,0))
-                ind_s=ind+int(round(len(extremos)/2,0))
-                if ind_s>len(extremos):
-                    ind_s=ind_i-1
 
-                cont=0
-                for x in range(len(extremos)-1):
-                    if (ind_i+x)>=(len(extremos)-1):
-                        ind_i=cont
-                        if frecuencias[ind_i]!=0:
-                            posx1=((-clas/2)+x)*(ancho/180)
-                            posy1=frecuencias[ind_i]*(ancho/max_frec)
-                            qt_polygon.append(QPointF(start.x()+posx1, start.y()-posy1+alto))
-                        cont +=1
+                prueba=az_min+1
+
+                if prueba in extremos:
+                    ind_i=az_min
+                    ind_s=az_max
+                    rango=ind_s-ind_i
+                    mitad=(ind_s+ind_i)/2
+                else:
+                    ind_s=az_min
+                    ind_i=az_max
+                    rango=(360-ind_i)+ind_s
+                    sum_mit=(ind_i+(ind_s+360))/2
+                    if sum_mit>=360:
+                        mitad=sum_mit-360
                     else:
-                        if frecuencias[ind_i+x]!=0:
-                            posx1=((-clas/2)+x)*(ancho/180)
-                            posy1=frecuencias[ind_i+x]*(ancho/max_frec)
-                            qt_polygon.append(QPointF(start.x()+posx1, start.y()-posy1+alto))
+                        mitad=sum_mit
 
-                    
-                qt_polygon.append(QPointF(start.x()+ancho, start.y()+alto))
-                qt_polygon.append(QPointF(start.x()-ancho, start.y()+alto))
+            cont=0
+            for i in range(len(extremos)-1):
+                x = (mitad-(extremos[i]))*ancho/(mitad-(extremos[0]))
+                y = frecuencias[cont]*alto2/max_frec
 
-                polygon_item = QGraphicsPolygonItem(qt_polygon)
-                pt_colour = self.Color_line.color()
-                pt_colour.setAlphaF(0.3)
-                myPen = QPen(pt_colour)
-                myPen.setWidth(2)
-                myPen.setCapStyle(Qt.FlatCap)
-                polygon_item.setPen(myPen)
-                brush = QBrush(QColor(pt_colour), style=Qt.SolidPattern)
-                polygon_item.setBrush(brush)
-                self.circular.addItem(polygon_item)
+                linea_frec = QGraphicsLineItem(start.x()-x, start.y()+alto, start.x()-x, start.y()-y+alto)            
+                colour = self.Color_dot.color()
+                myPen2 = QPen(colour)
+                myPen2.setWidth(4+(1/(clas/100)))
+                myPen2.setCapStyle(Qt.FlatCap)
+                linea_frec.setPen(myPen2)
+                self.circular.addItem(linea_frec)
+                cont+=1
 
+                if extremos[i]==int(az_med_t):
+                    linea_mean = QGraphicsLineItem(start.x()-x, start.y()+alto, start.x()-x, start.y()+alto-ancho)            
+                    colour2 = self.Color_mean.color()
+                    myPen2 = QPen(colour2)
+                    myPen2.setWidth(2)
+                    myPen2.setCapStyle(Qt.FlatCap)
+                    linea_mean.setPen(myPen2)
+                    self.circular.addItem(linea_mean)
 
-            text2 = QGraphicsSimpleTextItem(str(az_med_i))
-            text2.setPos(start.x(),start.y()+8+alto)
+                    text2 = QGraphicsSimpleTextItem(str(az_med_i))
+                    text2.setPos(start.x()-4-x,start.y()+8+alto)
+                    self.circular.addItem(text2)
+
+            text2 = QGraphicsSimpleTextItem(str(ind_i))
+            text2.setPos(start.x()-ancho-4,start.y()+8+alto)
             self.circular.addItem(text2)
 
-            text2 = QGraphicsSimpleTextItem(str(az_min))
-            text2.setPos(start.x()+((-clas/2)*(ancho/180)),start.y()+8+alto)
-            self.circular.addItem(text2)
-
-            text2 = QGraphicsSimpleTextItem(str(az_max))
-            text2.setPos(start.x()+((clas/2)*(ancho/180)),start.y()+8+alto)
+            text2 = QGraphicsSimpleTextItem(str(ind_s))
+            text2.setPos(start.x()+ancho-4,start.y()+8+alto)
             self.circular.addItem(text2)
 
         else:
@@ -2061,8 +2338,14 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             text2.setPos(start.x(),start.y())
             self.circular.addItem(text2)
 
+            resul_1 = "Data Number: 0"
+            self.num_d.setText(resul_1)
             resul_1 = "Mean Azimuth: <b>-° -' -''</b>"
             self.az_mean_t.setText(resul_1)
+            resul_7 = "Median Azimuth: <b>-° -' -''</b>"
+            self.az_median_t.setText(resul_7)
+            resul_7 = "Mode Azimuth: <b>-° -' -''</b>"
+            self.az_mode_t.setText(resul_7)
             resul_2 = "Length of Mean Vector: <b>-</b>"
             self.mod_med_t.setText(resul_2)
             resul_3 = "Circular Variance: <b>-</b>"
@@ -2075,7 +2358,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             self.par_k_t.setText(resul_4)
             resul_5 = "Angular Standard Deviation:<br> <b>-° -' -''</b>"
             self.des_ang_t.setText(resul_5)
-            resul_6 = "Mean Angular Deviation (Batschelet, 1981):<br> <b>-° -' -''</b>"
+            resul_6 = "Mean Angular Deviation:<br> <b>-° -' -''</b>"
             self.des_angm_t.setText(resul_6)
             resul_7 = "Skewness Coefficient (Asimetry or bias): <br> <b>-</b>"
             self.skew_t.setText(resul_7)
@@ -2105,12 +2388,14 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         self.az_mean_c.setEnabled(False)
         self.des_cir_c.setEnabled(False)
         self.rem_out.setEnabled(False)
+        self.cde.setEnabled(False)
 
         lis_az=list()
         lis_az.clear()
 
         if act_cde=="All":
             for j in range(len(lista_cde)):
+                self.progressBar.setValue(100*((j+1)/(len(lista_cde))))
                 cd_selec = project.mapLayersByName(lista_cde[j])[0]
                 for i in cd_selec.getFeatures():
                     attrs=i.attributes()
@@ -2313,8 +2598,14 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             text2.setPos(start.x(),start.y())
             self.circular.addItem(text2) 
 
+            resul_1 = "Data Number: 0"
+            self.num_d.setText(resul_1)
             resul_1 = "Mean Azimuth: <b>-° -' -''</b>"
             self.az_mean_t.setText(resul_1)
+            resul_7 = "Median Azimuth: <b>-° -' -''</b>"
+            self.az_median_t.setText(resul_7)
+            resul_7 = "Mode Azimuth: <b>-° -' -''</b>"
+            self.az_mode_t.setText(resul_7)
             resul_2 = "Length of Mean Vector: <b>-</b>"
             self.mod_med_t.setText(resul_2)
             resul_3 = "Circular Variance: <b>-</b>"
@@ -2327,7 +2618,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             self.var_ang_t.setText(resul_13)
             resul_5 = "Angular Standard Deviation:<br> <b>-° -' -''</b>"
             self.des_ang_t.setText(resul_5)
-            resul_6 = "Mean Angular Deviation (Batschelet, 1981):<br> <b>-° -' -''</b>"
+            resul_6 = "Mean Angular Deviation:<br> <b>-° -' -''</b>"
             self.des_angm_t.setText(resul_6)
             resul_7 = "Skewness Coefficient (Asimetry or bias): <br> <b>-</b>"
             self.skew_t.setText(resul_7)
@@ -2362,6 +2653,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
 
         if act_cde=="All":
             for j in range(len(lista_cde)):
+                self.progressBar.setValue(100*((j+1)/(len(lista_cde))))
                 cd_selec = project.mapLayersByName(lista_cde[j])[0]
                 for i in cd_selec.getFeatures():
                     attrs=i.attributes()
@@ -2439,6 +2731,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
 
         if act_cde=="All":
             for j in range(len(lista_cde)):
+                self.progressBar.setValue(100*((j+1)/(len(lista_cde))))
                 cd_selec = project.mapLayersByName(lista_cde[j])[0]
                 for i in cd_selec.getFeatures():
                     attrs=i.attributes()
@@ -2532,47 +2825,70 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         linea += f"Mean Azimuth: <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b><br>\n"
         linea += "<i>The direction <font class='over'>&theta;</font> of the vector resultant of &theta;<sub>1</sub>,..., &theta;<sub>n</sub> and is known as the mean direction (Fisher, 2000).</i><p>\n"
 
+        minutos, grados = math.modf(az_median)
+        segundos, minutos = math.modf(minutos*60)
+        segundos = round(segundos*60,2)
+        cen_seg=str(round(segundos-int(segundos),2))[1:4]
+
+        linea += f"Median Azimuth: <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b><br>\n"
+        linea += "<i>The sample median on the circle is defined as follows: Suppose we are given a set of sample points on the unit circle. Any point P such that:<br>" 
+        linea += "<b>1.</b> Half of the sample points are on each side of the diameter of the P point.<br>"
+        linea += "<b>2.</b> The majority of the sample points are nearer to P. that is, the P point has minimum value obtained by the Angular Standard Deviation (Mardia median).<br>"
+        linea += "Like in a linear case, for a sample of an odd size the median is an actual observation while for a sample of an even size the median is the midpoint (circular mean) of two consecutive observations. (Ratanaruamkam, S. (2006).</i><p>\n"
+
+        red=self.red_mode_s.value()
+        minutos, grados = math.modf(round(az_mode,red))
+        segundos, minutos = math.modf(minutos*60)
+        segundos = round(segundos*60,2)
+        cen_seg=str(round(segundos-int(segundos),2))[1:4]
+
+        linea += f"Mode Azimuth: <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b><br>\n"
+        linea += "<i>The sample modal direction  is the direction corresponding to the maximum concentration of the data. (More generally, any direction corresponding to a local maximum concentration of the data is a modal direction.).<br>"
+        linea += "The  mode has been determined from the rose diagram as the midpoint of the cell with largest frequency. However, the modal group can vary considerably in a rose diagram, depending on the locations of cell boundaries "
+        linea += "and on the amount of smoothing (classes numer), although this method also depends on rounding of continuous data. (Fisher, 2000).<br>"
+        linea += "In this case, consider than the modal direction has been calculate for <font class='over'>R</font> > 0.5 (See Length of Mean Vector).</i><p>\n"
+
         linea +="<b>Dispersion</b><br>\n"
         linea += f"Length of Mean Vector: <b>{mod_med:.3f}</b><br>\n"
-        linea += "<i>Range (0,1), <font class='over'>R</font> = 1 implies that all the data points are coincident. However, <font class='over'>R</font> = 0 does not imply uniform dispersion around the circle (Fisher, 2000)</i></p>\n"
+        linea += "<i>Range (0,1), <font class='over'>R</font> = 1 implies that all the data points are coincident. However, <font class='over'>R</font> = 0 does not imply uniform dispersion around the circle (Fisher, 2000).</i></p>\n"
 
         linea +=f"Circular Variance: <b>{var_cir:.3f}</b><br>\n"
-        linea += "<i>Range (0,1), the smaller the value of the circular variance, the more concentrated the distribution. However, V = 1 does not necessarily imply a maximally dispersed distribution.(Fisher, 2000)</i></p>\n"
+        linea += "<i>Range (0,1), the smaller the value of the circular variance, the more concentrated the distribution. However, V = 1 does not necessarily imply a maximally dispersed distribution (Fisher, 2000).</i></p>\n"
 
         minutos, grados = math.modf(des_cir)
         segundos, minutos = math.modf(minutos*60)
         segundos = round(segundos*60,2)
         cen_seg=str(round(segundos-int(segundos),2))[1:4]
         linea += f"Circular Standard Deviation: <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b><br>\n"
-        linea += "<i>The square root of the sample circular variance by analogy with the linear standard deviation.(Fisher, 2000)</i></p>\n"
+        linea += "<i>The square root of the sample circular variance by analogy with the linear standard deviation (Fisher, 2000).</i></p>\n"
 
         linea += f"Angular Variance: <b>{var_ang:.3f}</b><br>\n"
-        linea += "<i>This can be considered a measure of dispersion, it's the analogy with the linear variance. (Robert P. Mahan, 1991)</i><p>\n"
+        linea += "<i>This can be considered a measure of dispersion, it's the analogy with the linear variance (Robert P. Mahan, 1991).</i><p>\n"
 
         minutos, grados = math.modf(desv_ang_med)
         segundos, minutos = math.modf(minutos*60)
         segundos = round(segundos*60,2)
         cen_seg=str(round(segundos-int(segundos),2))[1:4]
-        linea += f"Mean Angular Deviation (Batschelet, 1981): <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b><br>\n"
-        linea +="<i>Taking the positive square root of angular variance. We can convert the angular deviation into degrees. (Robert P. Mahan, 1991)<i><p>\n"
+        linea += f"Mean Angular Deviation: <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b><br>\n"
+        linea +="<i>Taking the positive square root of angular variance. We can convert the angular deviation into degrees (Robert P. Mahan, 1991).<i><p>\n"
 
         minutos, grados = math.modf(desv_ang)
         segundos, minutos = math.modf(minutos*60)
         segundos = round(segundos*60,2)
         cen_seg=str(round(segundos-int(segundos),2))[1:4]
         linea += f"Angular Standard Deviation: <b>{grados:.0f}° {int(minutos):02d}' {int(segundos):02d}"+cen_seg+"''</b><br>\n"
-        linea += "<i></i></p>"
+        linea += "<i>This dispersion measure, corresponding to an angular measurement of the shortest arc that covers all the data, can be associated with the direction of the median (Fischer, 2000).</i></p>"
 
 
         linea += f"Circular Dispersion: <b>{disp_cir:.3f}</b><br>\n"
-        linea += "<i>The circular dispersion plays an important role in calculating a confidence interval for a mean direction, and in comparing and combining several sample mean directions.(Fisher, 2000)</i></p>\n"
+        linea += "<i>The circular dispersion plays an important role in calculating a confidence interval for a mean direction, and in comparing and combining several sample mean directions (Fisher, 2000).</i></p>\n"
 
         linea += f"Von Mises Concentration Parameter: <b>{par_k:.3f}</b><br>\n"
-        linea += "<i>This is a symmetric unimodal distribution which is the most common model for unimodal samples of circular data. (Fisher,2000)</i></p>\n"
+        linea += "<i>This is a symmetric unimodal distribution which is the most common model for unimodal samples of circular data (Fisher,2000).</i></p>\n"
 
         linea +="<b>Shape</b><br>\n"
         linea += f"Kurtosis Coefficient (Peakedness):  <b>{curt:.3f}</b><br>\n"
-        linea += "<i>Data from a unimodal symmetric distribution such as the von Mises will tend to have sample kurtosis values around zero; more peaked distributions will tend to have positive sample kurtosis. (Fisher, 2000)</i></p>\n"
+        linea += "<i>Data from a unimodal symmetric distribution such as the von Mises will tend to have sample kurtosis values around zero; more peaked distributions will tend to have positive sample kurtosis (Fisher, 2000).</i></p>\n"
         
         linea += f"Skewness Coefficient (Asimetry or Bias):  <b>{skew:.3f}</b><br>\n"
         linea += "<i>Measures for skewness and kurtosis are meaningful only for unimodal distributions.</i><p>\n"
@@ -2582,22 +2898,23 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         linea += "It`s the arithmetical mean of the error modules.<p>"
 
         linea += f"Linear Standard Deviation:  <b>{desv_sta_l:.3f}</b><br>\n"
-        linea += "<i>The Linear Standard Deviation of measured differences (module) between the tested product and the reference source, this represents a confidence level of 68.27%. (Cihangir Akşit, E. 2010)</i></p>"
+        linea += "<i>The Linear Standard Deviation of measured differences (module) between the tested product and the reference source, this represents a confidence level of 68.27% (Cihangir Akşit, E. 2010).</i></p>"
         
         linea += f"Circular Standard Deviation:  <b>{desv_sta_c:.3f}</b><br>\n"
-        linea += "<i>This deviation considers a certain percentage of the error in the two axes E (X) and N (Y) of the error vectors, estimated for both components together, This represents a confidence level of 39.35% (Cihangir Akşit, E. 2010)</i></p>"
+        linea += "<i>This deviation considers a certain percentage of the error in the two axes E (X) and N (Y) of the error vectors, estimated for both components together, This represents a confidence level of 39.35% (Cihangir Akşit, E. 2010).</i></p>"
         
         linea += f"Potencial Outlier (>): <b>{m2_desv:.3f}</b><br>\n" 
-        linea += "<i>A residual is considered to be a potential outlier (ie not part of the representative data set) if the absolute value of the residual is larger than a defined value. This value equates to the standard deviation of the observation multiplied by a statistical factor, M. (Cihangir Akşit, E. 2010)</i></p>"
+        linea += "<i>A residual is considered to be a potential outlier (ie not part of the representative data set) if the absolute value of the residual is larger than a defined value. This value equates to the standard deviation of the observation multiplied by a statistical factor, M (Cihangir Akşit, E. 2010).</i></p>"
         
         linea += f"Total Outlier: <b>{sum_out:.0f}</b><br>\n"
-        linea += "<i>The number of error vectors than their potential outlier is larger than the defined value</i></p>"
+        linea += "<i>The number of error vectors than their potential outlier is larger than the defined value.</i></p>"
 
         if self.idt.isChecked():
             linea += "<center><b>Error Vector (Module and Azimuth)</b></center></p>\n"
             linea += "<center><table border=1><tr><th>Module</th><th>Azimuth</th><th>Y</th><th>X</th></tr>\n"
             if act_cde=="All":
                 for j in range(len(lista_cde)):
+                    self.progressBar.setValue(100*((j+1)/(len(lista_cde))))
                     cd_selec = project.mapLayersByName(lista_cde[j])[0]
                     for i in cd_selec.getFeatures():
                         attrs=i.attributes()
@@ -2630,7 +2947,8 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         linea += "</p><b><i>References</i></b><br>"
         linea += "Fisher, N. I. (2000). Statistical analysis of circular data (Transferred to digital printing). Cambridge, Mass.: Cambridge University Press.<br>"
         linea += "Mahan, R. P. (1991). Circular Statistical Methods: Applications in Spatial and Temporal Performance Analysis. United States Army Research Institute for the Behavioral and Social Sciences, Special Report 16.<br>"
-        linea += "Cihangir Akşit, E. (2010). Evaluation of Land Maps, Aeronautical Charts and Digital Topographic Data. NATO."
+        linea += "Cihangir Akşit, E. (2010). Evaluation of Land Maps, Aeronautical Charts and Digital Topographic Data. NATO.<br>"
+        linea += "Ratanaruamkam, S. (2006). New Estimators of a Circular Median. Western Michigan University.<br>"
 
         f.write(linea)
         f.close()
@@ -2640,10 +2958,14 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
         self.gen_info.setEnabled(False)
 
 
+    def camb_text(self):
+        self.label_32.setText("") 
+        self.label_31.setText("")        
+
     # Copiar al portapales
     def clip(self):
         QApplication.clipboard().setImage(QImage(QWidget.grab(QGraphicsView(self.circular))))
-        imag=QGuiApplication.clipboard().image()
+        imag=QApplication.clipboard().image()
         imagen.append(imag)
         self.ins_imag()
         
