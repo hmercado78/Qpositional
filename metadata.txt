@@ -6,14 +6,14 @@
 name=Qpositional
 qgisMinimumVersion=3.0
 description=Assessment the positional quality of geographic data
-version=0.9.1
-author=anonymous
-email=anonymous@hotmail.com
+version=0.9.2
+author=Harold Mercado Llanos
+email=hmercado78@hotmail.com
 
 about=This plugin was developed for the assessment of the positional quality of geography data by applying circular statistics.
 
-tracker=https://github.com/anonymous/Qpositional/issues
-repository=https://github.com/anonymous/Qpositional
+tracker=https://github.com/hmercado78/Qpositional/issues
+repository=https://github.com/hmercado78/Qpositional
 # End of mandatory metadata
 
 # Recommended items:
@@ -25,7 +25,7 @@ hasProcessingProvider=no
 # Tags are comma separated with spaces allowed
 tags=Quality Dataset, Assessment positional, geographic data, python
 
-homepage=https://anonymous.es/
+homepage=https://github.com/hmercado78/Qpositional
 category=Plugins
 icon=icon.png
 # experimental flag
