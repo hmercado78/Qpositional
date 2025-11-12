@@ -1397,7 +1397,7 @@ Quantiles</string>
         </widget>
         <widget class="QWidget" name="tab_4">
          <attribute name="title">
-          <string>Setting</string>
+          <string>Settings</string>
          </attribute>
          <layout class="QHBoxLayout" name="horizontalLayout_3">
           <item>

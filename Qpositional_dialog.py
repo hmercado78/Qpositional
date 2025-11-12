@@ -230,7 +230,7 @@ class QpositionalDialog(QtWidgets.QDialog, FORM_CLASS):
             ruta_i=""
 
             # Plugin version label
-            self.lb_ver.setText('0.9.2')
+            self.lb_ver.setText('0.9.3')
 
             # Prepare starting table layout
             self.Tab_start.clear()
